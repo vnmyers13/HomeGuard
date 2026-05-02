@@ -1,0 +1,914 @@
+{
+  "document": "HomeGuard Privacy Platform \u2014 API Specification",
+  "version": "1.0",
+  "base_url": "http://{host}:8000 (LAN) | https://{tunnel-domain} (Cloudflare)",
+  "framework": "FastAPI Python 3.11 \u2014 auto-generates OpenAPI at /api/docs",
+  "auth_type": "JWT Bearer HS256 \u2014 8h TTL \u2014 stored in memory only on frontend",
+  "conventions": {
+    "headers_required": [
+      "Authorization: Bearer <jwt_token>",
+      "Content-Type: application/json"
+    ],
+    "success_envelope_single": "{ \"success\": true, \"data\": { ...object... } }",
+    "success_envelope_list": "{ \"success\": true, \"data\": [...], \"count\": N }",
+    "success_envelope_mutation": "{ \"success\": true, \"message\": \"...\" }",
+    "error_envelope": {
+      "format": "{ \"success\": false, \"error_code\": \"snake_case\", \"message\": \"human readable\", \"detail\": {}, \"request_id\": \"req_...\" }",
+      "standard_error_codes": {
+        "token_missing": "401 \u2014 No Authorization header",
+        "token_expired": "401 \u2014 JWT past expiry",
+        "token_invalid": "401 \u2014 Signature failed",
+        "token_revoked": "401 \u2014 Explicit logout",
+        "forbidden": "403 \u2014 Insufficient role",
+        "not_found": "404 \u2014 Resource does not exist",
+        "validation_error": "422 \u2014 Schema validation failed",
+        "rate_limited": "429 \u2014 Per-IP limit exceeded",
+        "internal_error": "500 \u2014 Unhandled exception"
+      }
+    },
+    "pagination": {
+      "type": "cursor-based",
+      "applies_to": [
+        "audit log",
+        "scan results",
+        "removal requests"
+      ],
+      "request_params": {
+        "limit": "integer default 25-100",
+        "cursor": "opaque base64 string"
+      },
+      "response_shape": "{ \"data\": [...], \"pagination\": { \"limit\": N, \"has_next\": bool, \"next_cursor\": \"...\", \"total_count\": N } }"
+    }
+  },
+  "routers": {
+    "auth": {
+      "prefix": "/api/auth",
+      "description": "Authentication \u2014 login, logout, current user",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/auth/login",
+          "auth": "None (public)",
+          "description": "Validate credentials, issue JWT, create session record. Rate-limited 10/min per IP.",
+          "request_body": {
+            "username": "string",
+            "password": "string"
+          },
+          "response": {
+            "token": "string",
+            "token_type": "bearer",
+            "expires_at": "ISO datetime",
+            "user_id": "UUID",
+            "role": "admin|member"
+          },
+          "status_codes": {
+            "200": "OK",
+            "401": "invalid_credentials",
+            "429": "rate limited"
+          },
+          "rules": [
+            "bcrypt verify, work factor 12+",
+            "Writes audit_log event_type=user_login"
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/auth/logout",
+          "auth": "JWT Bearer",
+          "description": "Set revoked_at on current session. Token immediately invalid.",
+          "status_codes": {
+            "200": "OK",
+            "401": "token invalid"
+          },
+          "rules": [
+            "Writes audit_log event_type=user_logout"
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/auth/me",
+          "auth": "JWT Bearer",
+          "description": "Return current user account details and linked profile_id",
+          "status_codes": {
+            "200": "OK",
+            "401": "token invalid"
+          }
+        }
+      ]
+    },
+    "profiles": {
+      "prefix": "/api/profiles",
+      "description": "Household profile and versioned PII field management",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/profiles",
+          "auth": "JWT \u2014 Admin all, Member own",
+          "description": "List active profiles with current exposure score",
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/profiles",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Create profile with optional initial fields. Max 5 per household.",
+          "request_body": {
+            "display_name": "string",
+            "full_legal_name": "string",
+            "date_of_birth": "ISO date",
+            "fields": "array of {field_type, field_value, field_subtype}"
+          },
+          "status_codes": {
+            "201": "Created",
+            "400": "profile_limit_reached",
+            "403": "forbidden"
+          },
+          "rules": [
+            "All PII encrypted before storage",
+            "Schedules full scan on creation"
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/profiles/{profile_id}",
+          "auth": "JWT \u2014 Admin or owner",
+          "description": "Full profile with all versioned fields including history",
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden",
+            "404": "not_found"
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/profiles/{profile_id}",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Update display_name or is_paused",
+          "request_body": {
+            "display_name": "string optional",
+            "is_paused": "boolean optional"
+          },
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden"
+          },
+          "rules": [
+            "Pausing suspends automation; unpausing schedules catch-up scan in 24h"
+          ]
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/profiles/{profile_id}",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Archive all data then hard delete in single transaction",
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/profiles/{profile_id}/fields",
+          "auth": "JWT \u2014 Admin or owner",
+          "description": "All PII fields grouped by type \u2014 current and historical",
+          "params": {
+            "field_type": "filter",
+            "current_only": "boolean default false"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/profiles/{profile_id}/fields",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Add new field value. Previous current value of same type/subtype is versioned.",
+          "request_body": {
+            "field_type": "string",
+            "field_value": "string",
+            "field_subtype": "string optional"
+          },
+          "status_codes": {
+            "201": "Created",
+            "400": "invalid_field_type"
+          },
+          "rules": [
+            "Triggers broker re-scan within 24h"
+          ]
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/profiles/{profile_id}/fields/{field_id}",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Retire field value (is_current=false). Does not hard-delete.",
+          "status_codes": {
+            "200": "OK",
+            "404": "not_found"
+          }
+        }
+      ]
+    },
+    "brokers": {
+      "prefix": "/api/brokers",
+      "description": "Broker registry \u2014 read and manage broker records and playbooks",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/brokers",
+          "auth": "JWT \u2014 Any",
+          "description": "List registry with filtering",
+          "params": {
+            "category": "filter",
+            "removal_method": "filter",
+            "is_active": "boolean",
+            "captcha_required": "boolean",
+            "q": "search name/domain"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/brokers/{broker_id}",
+          "auth": "JWT \u2014 Any",
+          "description": "Full broker with all playbook versions and field requirements",
+          "status_codes": {
+            "200": "OK",
+            "404": "not_found"
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/api/brokers/{broker_id}",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Override broker settings \u2014 is_active, notes, captcha_required, removal_method",
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden"
+          },
+          "rules": [
+            "Deactivating stops all future scans for this broker"
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/brokers/{broker_id}/playbooks",
+          "auth": "JWT \u2014 Admin only",
+          "description": "All versioned playbooks newest-first for rollback review",
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/brokers/{broker_id}/playbooks/{playbook_id}/activate",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Activate specific playbook version \u2014 atomically deactivates current",
+          "status_codes": {
+            "200": "OK",
+            "404": "not_found"
+          },
+          "rules": [
+            "Writes audit_log playbook_rolled_back"
+          ]
+        }
+      ]
+    },
+    "scans": {
+      "prefix": "/api/scans",
+      "description": "Scan lifecycle \u2014 trigger, monitor, results. SSE for live progress.",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/scans",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Trigger manual scan. Returns scan_run_id immediately.",
+          "request_body": {
+            "profile_id": "UUID optional",
+            "broker_id": "UUID optional",
+            "run_type": "manual"
+          },
+          "status_codes": {
+            "202": "Accepted",
+            "403": "forbidden",
+            "429": "scan already running"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/scans",
+          "auth": "JWT \u2014 Any",
+          "description": "Paginated scan run list newest-first",
+          "params": {
+            "profile_id": "filter",
+            "run_type": "filter",
+            "status": "filter",
+            "limit": "25 default",
+            "cursor": "pagination"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/scans/{scan_run_id}",
+          "auth": "JWT \u2014 Any",
+          "description": "Single scan run with aggregate stats",
+          "status_codes": {
+            "200": "OK",
+            "404": "not_found"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/scans/{scan_run_id}/results",
+          "auth": "JWT \u2014 Any",
+          "description": "Paginated per-broker results with filtering",
+          "params": {
+            "result_status": "filter",
+            "profile_id": "filter",
+            "limit": "50 default",
+            "cursor": "pagination"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/scans/{scan_run_id}/progress",
+          "auth": "JWT via ?token= query param",
+          "description": "SSE stream \u2014 live scan progress events",
+          "transport": "Server-Sent Events text/event-stream",
+          "event_format": "{ \"event\": \"scan_progress\", \"scan_run_id\": \"...\", \"completed\": 42, \"total\": 180, \"latest_result\": { \"broker_name\": \"...\", \"status\": \"...\" } }",
+          "final_event": "{ \"event\": \"scan_complete\" }",
+          "status_codes": {
+            "200": "SSE stream",
+            "404": "not_found"
+          },
+          "note": "Token in query param because SSE EventSource cannot set Authorization headers"
+        }
+      ]
+    },
+    "requests": {
+      "prefix": "/api/requests",
+      "description": "Removal request lifecycle visibility and control",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/requests",
+          "auth": "JWT \u2014 Admin all, Member own",
+          "description": "Paginated request list with rich filtering",
+          "params": {
+            "profile_id": "filter",
+            "broker_id": "filter",
+            "status": "filter",
+            "method": "filter",
+            "parent_only": "bool",
+            "relisting_only": "bool",
+            "limit": "50",
+            "cursor": "pagination"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/requests/{request_id}",
+          "auth": "JWT \u2014 Admin or owner",
+          "description": "Full request with status history, followups, mail classifications, exposure details",
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden",
+            "404": "not_found"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/requests/{request_id}/resubmit",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Re-execute removal workflow for failed or stalled request",
+          "status_codes": {
+            "202": "Accepted",
+            "400": "invalid_status_for_resubmit",
+            "403": "forbidden"
+          },
+          "rules": [
+            "Resets followup scheduling"
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/requests/{request_id}/history",
+          "auth": "JWT \u2014 Admin or owner",
+          "description": "Ordered status transition log from request_status_log",
+          "status_codes": {
+            "200": "OK"
+          }
+        }
+      ]
+    },
+    "reports": {
+      "prefix": "/api/reports",
+      "description": "Pre-computed analytics and report exports",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/reports/exposure-score",
+          "auth": "JWT \u2014 Admin all, Member own",
+          "description": "Daily exposure score time-series",
+          "params": {
+            "profile_id": "filter optional",
+            "from_date": "ISO date default 90d ago",
+            "to_date": "ISO date default today"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/reports/field-exposure",
+          "auth": "JWT \u2014 Admin or owner",
+          "description": "Field exposure breakdown per broker",
+          "params": {
+            "profile_id": "filter",
+            "field_type": "filter",
+            "is_currently_exposed": "bool default true"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/reports/relistings",
+          "auth": "JWT \u2014 Admin or owner",
+          "description": "Re-listing events with broker, profile, original removal date, days until re-listing",
+          "params": {
+            "profile_id": "filter",
+            "broker_id": "filter",
+            "from_date": "date"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/reports/audit-log",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Paginated append-only audit log with rich filtering",
+          "params": {
+            "profile_id": "filter",
+            "broker_id": "filter",
+            "event_type": "filter",
+            "actor_type": "filter",
+            "from_date": "default 30d",
+            "to_date": "date",
+            "limit": "100 max 500",
+            "cursor": "pagination"
+          },
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/reports/export",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Stream PDF or CSV report file",
+          "params": {
+            "report_type": "required \u2014 exposure_score|field_exposure|relistings|audit_log|removal_requests",
+            "format": "required \u2014 pdf|csv",
+            "profile_id": "filter",
+            "from_date": "date",
+            "to_date": "date"
+          },
+          "status_codes": {
+            "200": "file stream",
+            "400": "invalid params",
+            "403": "forbidden"
+          },
+          "rules": [
+            "Large exports >10k rows queued as background task \u2014 returns download link instead"
+          ]
+        }
+      ]
+    },
+    "notifications": {
+      "prefix": "/api/notifications",
+      "description": "Dashboard notification queue and WebSocket live push",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/notifications",
+          "auth": "JWT \u2014 Any",
+          "description": "Paginated notification queue \u2014 unread_count in meta",
+          "params": {
+            "is_read": "bool default false",
+            "notification_type": "filter",
+            "limit": "50",
+            "cursor": "pagination"
+          },
+          "status_codes": {
+            "200": "OK"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/notifications/{notification_id}/read",
+          "auth": "JWT \u2014 Any",
+          "description": "Mark single notification as read",
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden",
+            "404": "not_found"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/api/notifications/read-all",
+          "auth": "JWT \u2014 Any",
+          "description": "Bulk mark all current user's notifications as read",
+          "status_codes": {
+            "200": "OK \u2014 { marked_read: N }"
+          }
+        },
+        {
+          "method": "WS",
+          "path": "/api/ws/notifications",
+          "auth": "JWT via ?token= query param",
+          "description": "WebSocket live notification push. Server fans out via Redis pub/sub.",
+          "transport": "WebSocket ws:// (LAN) or wss:// (Cloudflare Tunnel)",
+          "event_format": "{ \"event\": \"notification\", \"data\": { \"id\": \"uuid\", \"notification_type\": \"...\", \"title\": \"...\", \"entity_type\": \"...\", \"entity_id\": \"uuid\", \"profile_id\": \"uuid\", \"created_at\": \"ISO datetime\" } }",
+          "heartbeat": "Server sends { \"event\": \"ping\" } every 30s. Client responds { \"event\": \"pong\" }",
+          "status_codes": {
+            "200": "WebSocket upgrade",
+            "401": "token invalid"
+          }
+        }
+      ]
+    },
+    "system": {
+      "prefix": "/api/system",
+      "description": "Health check, configuration, and aggregate statistics",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/system/health",
+          "auth": "None (public)",
+          "description": "Service health status for all stack services. Used by Docker health checks.",
+          "response_includes": [
+            "status per service: db|redis|worker|playwright|mailwatcher|n8n",
+            "last_scan_completed_at",
+            "celery_queue_depth",
+            "disk_usage per volume"
+          ],
+          "status_codes": {
+            "200": "healthy or degraded",
+            "503": "critical service down"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/system/config",
+          "auth": "JWT \u2014 Admin only",
+          "description": "Non-sensitive runtime config. Sensitive values shown as { configured: true } only.",
+          "status_codes": {
+            "200": "OK",
+            "403": "forbidden"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/api/system/stats",
+          "auth": "JWT \u2014 Any",
+          "description": "Household summary counts for dashboard overview cards",
+          "response_includes": [
+            "total_active_exposures",
+            "total_removal_requests",
+            "confirmed_removed_all_time",
+            "relisting_count",
+            "profiles_count",
+            "brokers_monitored",
+            "last_scan_at"
+          ],
+          "status_codes": {
+            "200": "OK"
+          }
+        }
+      ]
+    },
+    "webhooks": {
+      "prefix": "/api/webhooks",
+      "description": "n8n integration \u2014 broker discovery payload receiver",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/webhooks/n8n",
+          "auth": "HMAC-SHA256 (not JWT)",
+          "auth_header": "X-Homeguard-Signature: sha256=<hex_digest>",
+          "auth_verify": "SHA256(request_body, N8N_WEBHOOK_SECRET)",
+          "description": "Accept broker discovery payloads from n8n. Upsert brokers by canonical_domain.",
+          "request_body": {
+            "source": "string \u2014 feed name",
+            "discovered_at": "ISO datetime",
+            "brokers": "array up to 500 broker objects"
+          },
+          "response": {
+            "success": true,
+            "upserted": "N",
+            "skipped": "N",
+            "errors": "N"
+          },
+          "status_codes": {
+            "200": "OK",
+            "400": "schema invalid",
+            "401": "webhook_auth_failed"
+          },
+          "rules": [
+            "Upsert key = canonical_domain",
+            "Partial updates supported \u2014 fields absent from payload not overwritten",
+            "All upserts written to audit_log event_type=broker_registry_upsert"
+          ]
+        }
+      ]
+    }
+  },
+  "endpoint_index": [
+    {
+      "method": "POST",
+      "path": "/api/auth/login",
+      "auth": "None",
+      "paginated": false,
+      "role": "Public"
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin/Owner"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/profiles/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/profiles/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/{id}/fields",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin/Owner"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/{id}/fields",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/profiles/{id}/fields/{fid}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/brokers",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/brokers/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/brokers/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/brokers/{id}/playbooks",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/brokers/{id}/playbooks/{pid}/activate",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "POST",
+      "path": "/api/scans",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scans",
+      "auth": "JWT",
+      "paginated": "cursor",
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scans/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scans/{id}/results",
+      "auth": "JWT",
+      "paginated": "cursor",
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scans/{id}/progress",
+      "auth": "JWT via ?token=",
+      "paginated": "SSE",
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/requests",
+      "auth": "JWT",
+      "paginated": "cursor",
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/requests/{id}",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin/Owner"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requests/{id}/resubmit",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/requests/{id}/history",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin/Owner"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/exposure-score",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/field-exposure",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/relistings",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/audit-log",
+      "auth": "JWT",
+      "paginated": "cursor",
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/reports/export",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/notifications",
+      "auth": "JWT",
+      "paginated": "cursor",
+      "role": "Any"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/{id}/read",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "POST",
+      "path": "/api/notifications/read-all",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "WS",
+      "path": "/api/ws/notifications",
+      "auth": "JWT via ?token=",
+      "paginated": "stream",
+      "role": "Any"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/health",
+      "auth": "None",
+      "paginated": false,
+      "role": "Public"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/config",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Admin"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/stats",
+      "auth": "JWT",
+      "paginated": false,
+      "role": "Any"
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/n8n",
+      "auth": "HMAC-SHA256",
+      "paginated": false,
+      "role": "Service"
+    }
+  ]
+}

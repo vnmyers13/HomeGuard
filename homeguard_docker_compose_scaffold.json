@@ -1,0 +1,464 @@
+{
+  "document": "HomeGuard Privacy Platform \u2014 Docker Compose Scaffold",
+  "version": "1.0",
+  "host_os": "Ubuntu/Debian Linux x86-64",
+  "host_type": "Dedicated home server 24/7",
+  "host_ram": "8GB",
+  "email_provider": "Mailgun with custom domain",
+  "proxy": "Direct residential IP \u2014 PLAYWRIGHT_PROXY_URL placeholder in .env",
+  "updates": "Manual \u2014 docker compose pull",
+  "project_structure": {
+    "root_files": [
+      "docker-compose.yml",
+      ".env.example",
+      ".env (gitignored)",
+      "init.sh",
+      "README.md",
+      ".gitignore"
+    ],
+    "directories": {
+      "api/": "FastAPI backend \u2014 Dockerfile, main.py, routers/, models/, schemas/, services/, workers/, templates/",
+      "frontend/": "React + Vite + Tailwind \u2014 Dockerfile, nginx.conf, package.json, src/",
+      "playwright/": "Headless browser microservice \u2014 Dockerfile, main.py, executor.py",
+      "mailwatcher/": "IMAP poller \u2014 Dockerfile, main.py, classifier.py, patterns.yml",
+      "migrations/": "Alembic \u2014 env.py, alembic.ini, versions/",
+      "playbooks/": "Broker playbooks \u2014 schema.json, brokers/*.json",
+      "workflows/": "n8n workflow exports \u2014 broker_discovery.json",
+      "scripts/": "seed_brokers.py, backup.sh",
+      "docker/postgres/": "init.sql"
+    }
+  },
+  "docker_compose": {
+    "name": "homeguard",
+    "networks": {
+      "homeguard_net": {
+        "driver": "bridge",
+        "internal": true
+      },
+      "homeguard_egress": {
+        "driver": "bridge",
+        "internal": false
+      }
+    },
+    "volumes": [
+      "homeguard_db_data",
+      "homeguard_redis_data",
+      "homeguard_n8n_data",
+      "homeguard_screenshots",
+      "homeguard_logs"
+    ],
+    "services": {
+      "db": {
+        "image": "postgres:15-alpine",
+        "restart": "unless-stopped",
+        "env_vars": [
+          "POSTGRES_DB",
+          "POSTGRES_USER",
+          "POSTGRES_PASSWORD"
+        ],
+        "volumes": [
+          "homeguard_db_data:/var/lib/postgresql/data",
+          "./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro"
+        ],
+        "networks": [
+          "homeguard_net"
+        ],
+        "healthcheck": "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+        "memory_limit": "768M",
+        "logging": {
+          "driver": "json-file",
+          "max_size": "50m",
+          "max_file": 5
+        }
+      },
+      "redis": {
+        "image": "redis:7-alpine",
+        "restart": "unless-stopped",
+        "command": "redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}",
+        "volumes": [
+          "homeguard_redis_data:/data"
+        ],
+        "networks": [
+          "homeguard_net"
+        ],
+        "healthcheck": "redis-cli -a ${REDIS_PASSWORD} ping",
+        "memory_limit": "256M"
+      },
+      "api": {
+        "build": "./api",
+        "restart": "unless-stopped",
+        "ports": [
+          "${HOST_BIND_ADDRESS}:8000:8000"
+        ],
+        "volumes": [
+          "homeguard_logs:/app/logs"
+        ],
+        "networks": [
+          "homeguard_net",
+          "homeguard_egress"
+        ],
+        "depends_on": {
+          "db": "healthy",
+          "redis": "healthy"
+        },
+        "healthcheck": "curl -f http://localhost:8000/api/system/health",
+        "memory_limit": "512M"
+      },
+      "frontend": {
+        "build": "./frontend",
+        "restart": "unless-stopped",
+        "ports": [
+          "${HOST_BIND_ADDRESS}:3000:80"
+        ],
+        "networks": [
+          "homeguard_net"
+        ],
+        "depends_on": [
+          "api"
+        ],
+        "healthcheck": "curl -f http://localhost:80",
+        "memory_limit": "256M"
+      },
+      "worker": {
+        "build": "./api",
+        "restart": "unless-stopped",
+        "command": "celery -A workers.celery_app worker --loglevel=info --concurrency=2",
+        "volumes": [
+          "homeguard_screenshots:/app/screenshots",
+          "homeguard_logs:/app/logs"
+        ],
+        "networks": [
+          "homeguard_net",
+          "homeguard_egress"
+        ],
+        "depends_on": {
+          "db": "healthy",
+          "redis": "healthy"
+        },
+        "memory_limit": "512M"
+      },
+      "beat": {
+        "build": "./api",
+        "restart": "unless-stopped",
+        "command": "celery -A workers.celery_app beat --loglevel=info",
+        "networks": [
+          "homeguard_net"
+        ],
+        "depends_on": {
+          "db": "healthy",
+          "redis": "healthy"
+        },
+        "memory_limit": "128M"
+      },
+      "playwright": {
+        "build": "./playwright",
+        "restart": "unless-stopped",
+        "volumes": [
+          "homeguard_screenshots:/app/screenshots",
+          "./playbooks:/app/playbooks:ro"
+        ],
+        "networks": [
+          "homeguard_net",
+          "homeguard_egress"
+        ],
+        "healthcheck": "curl -f http://localhost:8001/health",
+        "security_opt": "seccomp=unconfined",
+        "shm_size": "256mb",
+        "memory_limit": "1024M"
+      },
+      "mailwatcher": {
+        "build": "./mailwatcher",
+        "restart": "unless-stopped",
+        "networks": [
+          "homeguard_net",
+          "homeguard_egress"
+        ],
+        "depends_on": {
+          "db": "healthy"
+        },
+        "memory_limit": "256M"
+      },
+      "n8n": {
+        "image": "n8nio/n8n:latest",
+        "restart": "unless-stopped",
+        "ports": [
+          "${HOST_BIND_ADDRESS}:5678:5678"
+        ],
+        "volumes": [
+          "homeguard_n8n_data:/home/node/.n8n",
+          "./workflows:/home/node/.n8n/workflows:ro"
+        ],
+        "networks": [
+          "homeguard_net",
+          "homeguard_egress"
+        ],
+        "depends_on": [
+          "api"
+        ],
+        "memory_limit": "768M",
+        "env_vars": [
+          "N8N_BASIC_AUTH_ACTIVE",
+          "N8N_BASIC_AUTH_USER",
+          "N8N_BASIC_AUTH_PASSWORD",
+          "N8N_HOST",
+          "N8N_PORT",
+          "WEBHOOK_URL",
+          "GENERIC_TIMEZONE"
+        ]
+      }
+    }
+  },
+  "env_variables": {
+    "general": {
+      "TIMEZONE": {
+        "default": "America/New_York",
+        "description": "Timezone for n8n and log timestamps"
+      },
+      "HOST_BIND_ADDRESS": {
+        "default": "0.0.0.0",
+        "description": "Change to 127.0.0.1 when Cloudflare Tunnel active"
+      }
+    },
+    "database": {
+      "POSTGRES_DB": {
+        "required": true
+      },
+      "POSTGRES_USER": {
+        "required": true
+      },
+      "POSTGRES_PASSWORD": {
+        "required": true,
+        "generate": "strong random"
+      },
+      "DATABASE_URL": {
+        "required": true,
+        "format": "postgresql+asyncpg://user:pass@db:5432/dbname"
+      },
+      "DB_ENCRYPTION_KEY": {
+        "required": true,
+        "generate": "openssl rand -base64 32"
+      }
+    },
+    "redis": {
+      "REDIS_PASSWORD": {
+        "required": true,
+        "generate": "strong random"
+      },
+      "REDIS_URL": {
+        "required": true,
+        "format": "redis://:password@redis:6379/0"
+      }
+    },
+    "auth": {
+      "JWT_SECRET": {
+        "required": true,
+        "generate": "openssl rand -hex 32"
+      },
+      "JWT_EXPIRY_HOURS": {
+        "default": 8
+      }
+    },
+    "email_mailgun": {
+      "REMOVAL_EMAIL_DOMAIN": {
+        "required": true,
+        "example": "yourdomain.com"
+      },
+      "REMOVAL_EMAIL": {
+        "required": true,
+        "example": "removal@yourdomain.com"
+      },
+      "SMTP_HOST": {
+        "value": "smtp.mailgun.org"
+      },
+      "SMTP_PORT": {
+        "value": 587
+      },
+      "SMTP_USER": {
+        "required": true,
+        "example": "postmaster@yourdomain.com"
+      },
+      "SMTP_PASSWORD": {
+        "required": true
+      },
+      "SMTP_USE_TLS": {
+        "value": true
+      },
+      "IMAP_HOST": {
+        "value": "imap.mailgun.org"
+      },
+      "IMAP_PORT": {
+        "value": 993
+      },
+      "IMAP_USER": {
+        "required": true
+      },
+      "IMAP_PASSWORD": {
+        "required": true
+      },
+      "IMAP_USE_SSL": {
+        "value": true
+      },
+      "IMAP_POLL_INTERVAL_SECONDS": {
+        "default": 900
+      }
+    },
+    "n8n": {
+      "N8N_BASIC_AUTH_USER": {
+        "default": "admin"
+      },
+      "N8N_BASIC_AUTH_PASSWORD": {
+        "required": true
+      },
+      "N8N_WEBHOOK_SECRET": {
+        "required": true,
+        "generate": "openssl rand -hex 32"
+      }
+    },
+    "playwright": {
+      "PLAYWRIGHT_SERVICE_URL": {
+        "value": "http://playwright:8001"
+      },
+      "PLAYWRIGHT_MIN_DELAY_MS": {
+        "default": 2000
+      },
+      "PLAYWRIGHT_MAX_DELAY_MS": {
+        "default": 5000
+      },
+      "PLAYWRIGHT_PROXY_URL": {
+        "required": false,
+        "description": "HTTP/SOCKS5 proxy for IP rotation \u2014 leave blank for direct residential IP"
+      }
+    },
+    "scheduling": {
+      "SCAN_SCHEDULE_CRON": {
+        "default": "0 2 * * *",
+        "description": "Daily scan at 02:00"
+      },
+      "SCREENSHOT_RETENTION_DAYS": {
+        "default": 90
+      },
+      "LOG_RETENTION_DAYS": {
+        "default": 30
+      }
+    },
+    "rate_limiting": {
+      "RATE_LIMIT_PER_MINUTE": {
+        "default": 100
+      },
+      "LOGIN_RATE_LIMIT_PER_MINUTE": {
+        "default": 10
+      }
+    },
+    "bootstrap": {
+      "ADMIN_USERNAME": {
+        "default": "admin"
+      },
+      "ADMIN_PASSWORD": {
+        "required": true
+      }
+    },
+    "celery": {
+      "CELERY_BROKER_URL": {
+        "value": "${REDIS_URL}"
+      },
+      "CELERY_RESULT_BACKEND": {
+        "value": "${REDIS_URL}"
+      },
+      "CELERY_WORKER_CONCURRENCY": {
+        "default": 2
+      }
+    }
+  },
+  "dockerfiles": {
+    "api": {
+      "base": "python:3.11-slim",
+      "type": "multi-stage",
+      "system_deps": [
+        "curl",
+        "libpq-dev",
+        "gcc"
+      ],
+      "non_root_user": "homeguard uid=1001",
+      "default_cmd": "uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2",
+      "note": "Shared by worker (overrides CMD) and beat (overrides CMD)"
+    },
+    "playwright": {
+      "base": "python:3.11-slim",
+      "installs": [
+        "Playwright for Python",
+        "Chromium browser",
+        "All Chromium system deps"
+      ],
+      "default_cmd": "uvicorn main:app --host 0.0.0.0 --port 8001"
+    },
+    "frontend": {
+      "base_build": "node:20-alpine",
+      "base_serve": "nginx:alpine",
+      "build_cmd": "npm run build",
+      "output": "dist/ copied to /usr/share/nginx/html"
+    }
+  },
+  "nginx_config": {
+    "spa_serving": "try_files $uri $uri/ /index.html",
+    "api_proxy": "location /api/ { proxy_pass http://api:8000; }",
+    "websocket_proxy": "location /api/ws { Upgrade + Connection headers }",
+    "security_headers": [
+      "X-Frame-Options: DENY",
+      "X-Content-Type-Options: nosniff",
+      "Referrer-Policy: strict-origin-when-cross-origin",
+      "Content-Security-Policy: default-src self"
+    ],
+    "asset_caching": "1 year for .js .css .png .jpg .ico .svg .woff2"
+  },
+  "init_sh_steps": [
+    "1. Check Docker and Docker Compose prerequisites",
+    "2. Validate .env file exists and has no CHANGE_ME placeholders",
+    "3. Start db and redis services",
+    "4. Wait for PostgreSQL to be ready",
+    "5. Run Alembic migrations: alembic upgrade head",
+    "6. Seed broker registry: python scripts/seed_brokers.py",
+    "7. Create admin user from ADMIN_USERNAME/ADMIN_PASSWORD env vars",
+    "8. Start all services: docker compose up -d",
+    "9. Health check: curl /api/system/health",
+    "10. Print LAN URLs for dashboard, API docs, n8n"
+  ],
+  "postgres_init_sql": {
+    "extensions": [
+      "uuid-ossp",
+      "pgcrypto"
+    ],
+    "schemas_created": [
+      "identity",
+      "registry",
+      "scanning",
+      "requests",
+      "mail",
+      "audit",
+      "reporting",
+      "auth",
+      "archive"
+    ],
+    "grants": "ALL on each schema TO homeguard",
+    "search_path": "identity, registry, scanning, requests, mail, audit, reporting, auth, archive, public"
+  },
+  "cloudflare_tunnel_migration": {
+    "step_1": "Install cloudflared, authenticate",
+    "step_2": "Route domain to http://localhost:3000 (dashboard) and http://localhost:8000 (API)",
+    "step_3": "Set HOST_BIND_ADDRESS=127.0.0.1 in .env",
+    "step_4": "docker compose up -d",
+    "step_5": "Verify tunnel \u2014 LAN direct IP:port access now refused",
+    "code_changes_required": false
+  },
+  "common_commands": {
+    "setup": "./init.sh",
+    "start": "docker compose up -d",
+    "stop": "docker compose down",
+    "logs_all": "docker compose logs -f",
+    "logs_service": "docker compose logs -f <service>",
+    "update_images": "docker compose pull && docker compose up -d",
+    "run_migration": "docker compose run --rm api alembic upgrade head",
+    "db_shell": "docker compose exec db psql -U homeguard homeguard",
+    "health_check": "curl http://localhost:8000/api/system/health",
+    "backup": "./scripts/backup.sh"
+  }
+}

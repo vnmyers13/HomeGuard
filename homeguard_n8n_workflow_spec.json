@@ -1,0 +1,663 @@
+{
+  "document": "HomeGuard Privacy Platform \u2014 n8n Workflow Specification",
+  "version": "1.0",
+  "date": "May 2026",
+  "service": "n8n",
+  "image": "n8nio/n8n:latest",
+  "lan_port": 5678,
+  "workflow_files_location": "workflows/",
+  "description": "Defines the broker discovery automation workflows \u2014 orchestrator/sub-workflow architecture, source fetching, full normalisation, HMAC-authenticated batch posting to the HomeGuard API webhook, error handling, and retry logic.",
+  "design_decisions": {
+    "workflow_structure": "One orchestrator workflow triggering sub-workflows per source \u2014 failed sources don't block others, each sub-workflow independently testable and enable/disableable",
+    "batch_size": "50 brokers per POST \u2014 avoids body size limits, gives natural retry unit",
+    "source_failure": "Retry up to 3 times then continue \u2014 transient failures don't stop successful sources. Persistent failures surface dashboard notification.",
+    "normalisation": "n8n handles full normalisation into HomeGuard broker schema before posting \u2014 API webhook receives clean validated data"
+  },
+  "n8n_environment": {
+    "env_vars_used": {
+      "N8N_BASIC_AUTH_ACTIVE": "true",
+      "N8N_BASIC_AUTH_USER": "${N8N_BASIC_AUTH_USER}",
+      "N8N_BASIC_AUTH_PASSWORD": "${N8N_BASIC_AUTH_PASSWORD}",
+      "N8N_HOST": "0.0.0.0",
+      "N8N_PORT": "5678",
+      "WEBHOOK_URL": "http://api:8000",
+      "GENERIC_TIMEZONE": "${TIMEZONE}"
+    },
+    "credentials_needed": [
+      {
+        "name": "HomeGuard API Webhook",
+        "type": "Header Auth",
+        "header_name": "X-Homeguard-Signature",
+        "header_value": "Computed per-request \u2014 see HMAC section",
+        "note": "Cannot be stored as static credential \u2014 computed in Code node each request"
+      },
+      {
+        "name": "GitHub HTTP",
+        "type": "None (public endpoints \u2014 no auth needed)",
+        "note": "GitHub raw content URLs are public. Rate limit: 60 req/hour unauthenticated."
+      }
+    ],
+    "workflow_storage": "Persisted in homeguard_n8n_data volume. JSON exports committed to workflows/ in repo."
+  },
+  "workflow_inventory": {
+    "WF-001": {
+      "name": "Broker Discovery \u2014 Orchestrator",
+      "file": "workflows/broker_discovery_orchestrator.json",
+      "description": "Weekly scheduled workflow that triggers all source sub-workflows in sequence. Aggregates results and posts a summary notification to the HomeGuard API.",
+      "trigger": "Schedule \u2014 every Sunday at 06:00 (${TIMEZONE})",
+      "active": true
+    },
+    "WF-002": {
+      "name": "Broker Discovery \u2014 GitHub Big-Ass List",
+      "file": "workflows/source_github_big_ass_list.json",
+      "description": "Fetches and parses the Big-Ass Data Broker Opt-Out List from GitHub. Handles Markdown format parsing.",
+      "trigger": "Execute Workflow node (called by WF-001)",
+      "active": true,
+      "source_url": "https://raw.githubusercontent.com/yaelwrites/Big-Ass-Data-Broker-Opt-Out-List/main/README.md",
+      "format": "Markdown"
+    },
+    "WF-003": {
+      "name": "Broker Discovery \u2014 EFF Surveillance Self-Defense",
+      "file": "workflows/source_eff_ssd.json",
+      "description": "Fetches broker data from EFF-maintained lists. Handles JSON format.",
+      "trigger": "Execute Workflow node (called by WF-001)",
+      "active": true,
+      "source_url": "${EFF_BROKER_LIST_URL}",
+      "format": "JSON",
+      "note": "URL configurable via n8n environment variable \u2014 defaults to known EFF resource"
+    },
+    "WF-004": {
+      "name": "Broker Discovery \u2014 Custom URL",
+      "file": "workflows/source_custom_url.json",
+      "description": "Fetches broker data from a user-configurable URL. Supports JSON and CSV formats. Disabled by default \u2014 enable and configure URL in n8n UI.",
+      "trigger": "Execute Workflow node (called by WF-001)",
+      "active": false,
+      "source_url": "${CUSTOM_BROKER_LIST_URL}",
+      "format": "JSON or CSV (auto-detected)"
+    },
+    "WF-005": {
+      "name": "Discovery Run Complete \u2014 Notify",
+      "file": "workflows/discovery_notify.json",
+      "description": "Called at end of orchestrator run. Posts a run summary to the HomeGuard API system notification endpoint.",
+      "trigger": "Execute Workflow node (called by WF-001 after all sources complete)",
+      "active": true
+    }
+  },
+  "workflow_definitions": {
+    "WF-001_orchestrator": {
+      "workflow_id": "WF-001",
+      "nodes": [
+        {
+          "node_id": "n1",
+          "name": "Schedule Trigger",
+          "type": "n8n-nodes-base.scheduleTrigger",
+          "description": "Fires every Sunday at 06:00 in configured timezone",
+          "config": {
+            "rule": {
+              "interval": [
+                {
+                  "field": "cronExpression",
+                  "expression": "0 6 * * 0"
+                }
+              ]
+            }
+          },
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n2",
+          "name": "Set Run Context",
+          "type": "n8n-nodes-base.set",
+          "description": "Initialises run metadata passed to all sub-workflows",
+          "config": {
+            "values": {
+              "run_id": "={{ $now.toISO() }}",
+              "run_date": "={{ $today.toISO() }}",
+              "batch_size": 50,
+              "api_webhook_url": "={{ $env.WEBHOOK_URL }}/api/webhooks/n8n",
+              "n8n_webhook_secret": "={{ $env.N8N_WEBHOOK_SECRET }}"
+            }
+          },
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n3",
+          "name": "Run GitHub Big-Ass List",
+          "type": "n8n-nodes-base.executeWorkflow",
+          "description": "Trigger WF-002 and wait for completion. On error: catch and continue.",
+          "config": {
+            "workflowId": "WF-002",
+            "waitForCompletion": true,
+            "inputData": "={{ { run_id: $json.run_id, api_webhook_url: $json.api_webhook_url, n8n_webhook_secret: $json.n8n_webhook_secret, batch_size: $json.batch_size } }}"
+          },
+          "error_handling": "continueOnFail: true \u2014 error captured in output",
+          "outputs": [
+            "main",
+            "error"
+          ]
+        },
+        {
+          "node_id": "n4",
+          "name": "Run EFF List",
+          "type": "n8n-nodes-base.executeWorkflow",
+          "description": "Trigger WF-003 \u2014 runs regardless of WF-002 outcome",
+          "config": {
+            "workflowId": "WF-003",
+            "waitForCompletion": true,
+            "inputData": "={{ { run_id: $json.run_id, api_webhook_url: $json.api_webhook_url, n8n_webhook_secret: $json.n8n_webhook_secret, batch_size: $json.batch_size } }}"
+          },
+          "error_handling": "continueOnFail: true",
+          "outputs": [
+            "main",
+            "error"
+          ]
+        },
+        {
+          "node_id": "n5",
+          "name": "Run Custom URL",
+          "type": "n8n-nodes-base.executeWorkflow",
+          "description": "Trigger WF-004 \u2014 only runs if WF-004 is active",
+          "config": {
+            "workflowId": "WF-004",
+            "waitForCompletion": true,
+            "inputData": "={{ { run_id: $json.run_id, api_webhook_url: $json.api_webhook_url, n8n_webhook_secret: $json.n8n_webhook_secret, batch_size: $json.batch_size } }}"
+          },
+          "error_handling": "continueOnFail: true",
+          "outputs": [
+            "main",
+            "error"
+          ]
+        },
+        {
+          "node_id": "n6",
+          "name": "Aggregate Results",
+          "type": "n8n-nodes-base.code",
+          "description": "Collects success/failure/broker counts from all sub-workflow outputs into a single summary object",
+          "code": "\nconst results = $input.all();\nconst summary = {\n  run_id: results[0]?.json?.run_id || '',\n  sources_attempted: 3,\n  sources_succeeded: results.filter(r => !r.json?.error).length,\n  sources_failed: results.filter(r => r.json?.error).length,\n  total_brokers_upserted: results.reduce((sum, r) => sum + (r.json?.brokers_upserted || 0), 0),\n  total_brokers_skipped: results.reduce((sum, r) => sum + (r.json?.brokers_skipped || 0), 0),\n  failed_sources: results.filter(r => r.json?.error).map(r => r.json?.source_name),\n  completed_at: new Date().toISOString()\n};\nreturn [{ json: summary }];\n",
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n7",
+          "name": "Notify Completion",
+          "type": "n8n-nodes-base.executeWorkflow",
+          "config": {
+            "workflowId": "WF-005",
+            "waitForCompletion": false,
+            "inputData": "={{ $json }}"
+          },
+          "outputs": [
+            "main"
+          ]
+        }
+      ],
+      "connections": {
+        "n1": "n2",
+        "n2": "n3",
+        "n3": "n4",
+        "n4": "n5",
+        "n5": "n6",
+        "n6": "n7"
+      }
+    },
+    "WF-002_github": {
+      "workflow_id": "WF-002",
+      "source_name": "github_big_ass_list",
+      "input_format": "Markdown",
+      "nodes": [
+        {
+          "node_id": "n1",
+          "name": "Workflow Input",
+          "type": "n8n-nodes-base.executeWorkflowTrigger",
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n2",
+          "name": "Fetch README from GitHub",
+          "type": "n8n-nodes-base.httpRequest",
+          "description": "GET raw Markdown from GitHub. Retry 3 times on failure.",
+          "config": {
+            "method": "GET",
+            "url": "https://raw.githubusercontent.com/yaelwrites/Big-Ass-Data-Broker-Opt-Out-List/main/README.md",
+            "response_format": "text",
+            "timeout": 30000,
+            "retry_on_fail": true,
+            "max_tries": 3,
+            "wait_between_tries": 10000
+          },
+          "error_handling": "On final failure: return { error: true, source_name: github_big_ass_list, message: error.message }",
+          "outputs": [
+            "main",
+            "error"
+          ]
+        },
+        {
+          "node_id": "n3",
+          "name": "Parse Markdown to Broker List",
+          "type": "n8n-nodes-base.code",
+          "description": "Extracts broker entries from Markdown table/list format. Returns array of raw broker objects.",
+          "parsing_strategy": "Regex scan for lines containing URLs and broker names in table rows or list items",
+          "code_logic": [
+            "Split content by newlines",
+            "Filter lines matching Markdown table row pattern: | BrokerName | URL | Category | ...",
+            "For list items: match pattern '- [BrokerName](url)' or '* BrokerName: url'",
+            "Extract: name, url, opt_out_url, removal_type (from column/inline text)",
+            "Return array of { raw_name, raw_url, raw_opt_out_url, raw_removal_type, raw_category }"
+          ],
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n4",
+          "name": "Normalise to HomeGuard Schema",
+          "type": "n8n-nodes-base.code",
+          "description": "Maps raw parsed fields to HomeGuard broker schema fields. Applies category and removal_method mappings.",
+          "normalisation_rules": {
+            "canonical_domain": "Extract root domain from raw_url via URL parsing. Lowercase. Remove www. prefix.",
+            "display_name": "Trim whitespace from raw_name. Title-case if ALL CAPS.",
+            "category": {
+              "mapping": {
+                "people search": "people_search",
+                "data broker": "data_broker",
+                "background check": "background_check",
+                "social": "social_web",
+                "marketing": "data_broker",
+                "default": "data_broker"
+              },
+              "method": "Lowercase raw_category, match against mapping keys via includes()"
+            },
+            "removal_method": {
+              "mapping": {
+                "web form": "web_form",
+                "form": "web_form",
+                "email": "email",
+                "mail": "email",
+                "letter": "legal_letter",
+                "ccpa": "legal_letter",
+                "gdpr": "legal_letter",
+                "manual": "manual",
+                "default": "web_form"
+              }
+            },
+            "opt_out_url": "Use raw_opt_out_url if present. Fallback: raw_url. Validate starts with https://",
+            "ccpa_applicable": "True if category is data_broker or removal_method contains letter/ccpa",
+            "gdpr_applicable": "False by default \u2014 US-focused list",
+            "estimated_response_days": "null \u2014 not provided by this source",
+            "discovered_via": "github_big_ass_list"
+          },
+          "validation": [
+            "Skip entry if canonical_domain is empty or not a valid domain pattern",
+            "Skip entry if canonical_domain is a duplicate within this batch (dedup by domain)"
+          ],
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n5",
+          "name": "Split Into Batches of 50",
+          "type": "n8n-nodes-base.splitInBatches",
+          "config": {
+            "batch_size": "={{ $('Workflow Input').item.json.batch_size }}"
+          },
+          "outputs": [
+            "main",
+            "done"
+          ]
+        },
+        {
+          "node_id": "n6",
+          "name": "Compute HMAC Signature",
+          "type": "n8n-nodes-base.code",
+          "description": "Computes HMAC-SHA256 signature of the request body using N8N_WEBHOOK_SECRET",
+          "code": "\nconst crypto = require('crypto');\nconst items = $input.all();\nconst payload = {\n  source: 'github_big_ass_list',\n  discovered_at: new Date().toISOString(),\n  brokers: items.map(i => i.json)\n};\nconst body = JSON.stringify(payload);\nconst secret = $('Workflow Input').item.json.n8n_webhook_secret;\nconst signature = 'sha256=' + crypto.createHmac('sha256', secret).update(body).digest('hex');\nreturn [{ json: { payload, body, signature } }];\n",
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n7",
+          "name": "POST Batch to Webhook",
+          "type": "n8n-nodes-base.httpRequest",
+          "description": "POST normalised broker batch to HomeGuard API with HMAC signature header",
+          "config": {
+            "method": "POST",
+            "url": "={{ $('Workflow Input').item.json.api_webhook_url }}",
+            "headers": {
+              "Content-Type": "application/json",
+              "X-Homeguard-Signature": "={{ $json.signature }}"
+            },
+            "body": "={{ $json.body }}",
+            "body_content_type": "raw",
+            "response_format": "json",
+            "timeout": 30000,
+            "retry_on_fail": true,
+            "max_tries": 3,
+            "wait_between_tries": 5000
+          },
+          "outputs": [
+            "main",
+            "error"
+          ]
+        },
+        {
+          "node_id": "n8",
+          "name": "Accumulate Batch Results",
+          "type": "n8n-nodes-base.code",
+          "description": "Accumulates upserted/skipped/error counts across all batches",
+          "outputs": [
+            "main"
+          ]
+        },
+        {
+          "node_id": "n9",
+          "name": "Return Summary",
+          "type": "n8n-nodes-base.set",
+          "config": {
+            "values": {
+              "source_name": "github_big_ass_list",
+              "brokers_discovered": "={{ $json.total_discovered }}",
+              "brokers_upserted": "={{ $json.total_upserted }}",
+              "brokers_skipped": "={{ $json.total_skipped }}",
+              "batches_sent": "={{ $json.batches_sent }}",
+              "error": null
+            }
+          },
+          "outputs": [
+            "main"
+          ]
+        }
+      ],
+      "connections": {
+        "n1": "n2",
+        "n2_success": "n3",
+        "n2_error": "return error summary",
+        "n3": "n4",
+        "n4": "n5",
+        "n5_batch": "n6",
+        "n6": "n7",
+        "n7": "n8",
+        "n5_done": "n9"
+      }
+    },
+    "WF-003_eff": {
+      "workflow_id": "WF-003",
+      "source_name": "eff_broker_list",
+      "input_format": "JSON",
+      "nodes_summary": "Same structure as WF-002 but with JSON parsing instead of Markdown",
+      "fetch_url": "${EFF_BROKER_LIST_URL}",
+      "parsing_strategy": {
+        "expected_json_shape": "Array of objects with name, website, opt_out_url, category fields",
+        "fallback": "If shape differs, attempt field mapping by common key names: url/website/domain, name/broker_name/title",
+        "on_unrecognised_format": "Log warning, return empty broker array, report in summary"
+      },
+      "normalisation": "Same rules as WF-002 normalisation node \u2014 reuses Code node logic via shared code snippet",
+      "discovered_via": "eff_broker_list"
+    },
+    "WF-004_custom": {
+      "workflow_id": "WF-004",
+      "source_name": "custom_url",
+      "active_by_default": false,
+      "input_format": "auto-detected (JSON or CSV)",
+      "fetch_url": "${CUSTOM_BROKER_LIST_URL}",
+      "format_detection": {
+        "json": "Response Content-Type contains application/json OR body starts with [ or {",
+        "csv": "Response Content-Type contains text/csv OR text/plain AND body contains commas and newlines"
+      },
+      "csv_parsing": {
+        "library": "n8n built-in CSV parsing via Spreadsheet File node",
+        "expected_columns": [
+          "name or broker_name",
+          "domain or url or website",
+          "opt_out_url (optional)",
+          "category (optional)",
+          "removal_method (optional)"
+        ],
+        "header_row": "Assumed present. Column names matched case-insensitively."
+      },
+      "normalisation": "Same rules as WF-002",
+      "discovered_via": "custom_url"
+    },
+    "WF-005_notify": {
+      "workflow_id": "WF-005",
+      "nodes": [
+        {
+          "node_id": "n1",
+          "name": "Workflow Input",
+          "type": "n8n-nodes-base.executeWorkflowTrigger"
+        },
+        {
+          "node_id": "n2",
+          "name": "Build Notification Payload",
+          "type": "n8n-nodes-base.set",
+          "config": {
+            "notification_type": "system_alert",
+            "title": "={{ 'Broker discovery run complete \u2014 ' + $json.total_brokers_upserted + ' brokers upserted' }}",
+            "body": "={{ 'Sources: ' + $json.sources_succeeded + '/' + $json.sources_attempted + ' succeeded. Failed: ' + ($json.failed_sources.join(', ') || 'none') }}",
+            "entity_type": null,
+            "profile_id": null
+          }
+        },
+        {
+          "node_id": "n3",
+          "name": "Compute HMAC",
+          "type": "n8n-nodes-base.code",
+          "description": "Same HMAC computation as WF-002 n6"
+        },
+        {
+          "node_id": "n4",
+          "name": "POST to API Notifications",
+          "type": "n8n-nodes-base.httpRequest",
+          "config": {
+            "method": "POST",
+            "url": "http://api:8000/api/system/n8n-notify",
+            "headers": {
+              "X-Homeguard-Signature": "={{ $json.signature }}"
+            },
+            "note": "Internal endpoint \u2014 authenticated via HMAC, creates system_alert notification in DB"
+          }
+        }
+      ]
+    }
+  },
+  "hmac_signing": {
+    "description": "Every POST to /api/webhooks/n8n must include an HMAC-SHA256 signature",
+    "algorithm": "HMAC-SHA256",
+    "key": "${N8N_WEBHOOK_SECRET} \u2014 injected as n8n environment variable",
+    "input": "JSON.stringify(payload) \u2014 full request body string",
+    "header": "X-Homeguard-Signature: sha256={hex_digest}",
+    "n8n_implementation": {
+      "node_type": "Code node",
+      "runtime": "Node.js (n8n Code node uses Node.js crypto module)",
+      "code": "const sig = 'sha256=' + require('crypto').createHmac('sha256', secret).update(body).digest('hex');"
+    },
+    "api_verification": "FastAPI webhook handler: hmac.compare_digest(computed, received) \u2014 constant-time comparison"
+  },
+  "broker_normalisation_rules": {
+    "canonical_domain": {
+      "rule": "Extract hostname from URL, remove www. prefix, lowercase",
+      "example": "https://www.Spokeo.com/search \u2192 spokeo.com",
+      "implementation": "new URL(raw_url).hostname.replace(/^www\\./, '').toLowerCase()"
+    },
+    "display_name": {
+      "rule": "Trim whitespace, normalise case",
+      "invalid_skip": "Skip if empty after trim"
+    },
+    "category_mapping": {
+      "people_search": [
+        "people search",
+        "people finder",
+        "person search",
+        "white pages",
+        "phonebook"
+      ],
+      "data_broker": [
+        "data broker",
+        "marketing",
+        "advertising",
+        "credit",
+        "consumer data",
+        "financial"
+      ],
+      "background_check": [
+        "background check",
+        "background screening",
+        "criminal",
+        "court records"
+      ],
+      "social_web": [
+        "social",
+        "social media",
+        "public records",
+        "web scraper"
+      ],
+      "default": "data_broker"
+    },
+    "removal_method_mapping": {
+      "web_form": [
+        "web form",
+        "online form",
+        "form",
+        "website",
+        "web"
+      ],
+      "email": [
+        "email",
+        "e-mail",
+        "mail to"
+      ],
+      "legal_letter": [
+        "letter",
+        "mail",
+        "post",
+        "ccpa",
+        "gdpr",
+        "written"
+      ],
+      "manual": [
+        "manual",
+        "phone",
+        "call",
+        "varies"
+      ],
+      "unsupported": [
+        "no opt-out",
+        "not available",
+        "n/a"
+      ],
+      "default": "web_form"
+    },
+    "skip_conditions": [
+      "canonical_domain is empty",
+      "canonical_domain fails regex: ^[a-z0-9.-]+\\.[a-z]{2,}$",
+      "canonical_domain is a duplicate within current batch",
+      "display_name is empty"
+    ],
+    "ccpa_applicable_heuristic": "True if category=data_broker OR removal_method=legal_letter OR source name contains 'ccpa'",
+    "gdpr_applicable_heuristic": "False by default for US-focused discovery sources. Set manually via registry override."
+  },
+  "webhook_payload_format": {
+    "description": "Exact JSON structure POSTed to /api/webhooks/n8n",
+    "example": {
+      "source": "github_big_ass_list",
+      "discovered_at": "2026-05-04T06:03:22.000Z",
+      "brokers": [
+        {
+          "canonical_domain": "spokeo.com",
+          "display_name": "Spokeo",
+          "category": "people_search",
+          "removal_method": "web_form",
+          "opt_out_url": "https://www.spokeo.com/optout",
+          "contact_email": null,
+          "ccpa_applicable": true,
+          "gdpr_applicable": false,
+          "estimated_response_days": null,
+          "discovered_via": "github_big_ass_list"
+        }
+      ]
+    },
+    "constraints": {
+      "max_brokers_per_payload": 50,
+      "required_fields": [
+        "canonical_domain",
+        "display_name",
+        "category",
+        "removal_method",
+        "discovered_via"
+      ],
+      "optional_fields": [
+        "opt_out_url",
+        "contact_email",
+        "ccpa_applicable",
+        "gdpr_applicable",
+        "estimated_response_days"
+      ]
+    }
+  },
+  "error_handling": {
+    "source_fetch_failure": {
+      "retry_policy": "3 retries with 10s wait between attempts (configured in HTTP Request node)",
+      "on_final_failure": "Return error summary object to orchestrator: { error: true, source_name, message }",
+      "orchestrator_behaviour": "Log failure, continue to next source, include failed source in completion notification"
+    },
+    "webhook_post_failure": {
+      "retry_policy": "3 retries with 5s wait between attempts per batch",
+      "on_final_failure": "Log failed batch with broker count, continue to next batch, include in summary",
+      "note": "Missed brokers will be picked up on the following week's run"
+    },
+    "parse_error": {
+      "behaviour": "Log error with source URL and raw content snippet. Return empty broker array. Continue workflow.",
+      "notification": "Include parse_error: true in summary returned to orchestrator"
+    },
+    "hmac_signing_error": {
+      "behaviour": "Stop workflow execution \u2014 this is a configuration error. Alert via n8n error workflow.",
+      "note": "HMAC failure means N8N_WEBHOOK_SECRET env var is missing or malformed"
+    }
+  },
+  "workflow_testing": {
+    "manual_trigger": "Each workflow has a Manual Trigger node (disabled in production) that allows one-click test execution from the n8n UI",
+    "dry_run_mode": {
+      "description": "Set dry_run=true in Set Run Context node to execute full normalisation without posting to the API",
+      "implementation": "Add IF node after normalisation: if dry_run=true \u2192 route to a Set node that logs broker count, else \u2192 route to batch/post nodes"
+    },
+    "test_webhook_url": "Override api_webhook_url in Set Run Context to http://api:8000/api/webhooks/n8n-test for development testing against a mock endpoint"
+  },
+  "workflow_versioning": {
+    "export_process": [
+      "In n8n UI: Settings \u2192 Download \u2192 saves workflow as JSON",
+      "Place in workflows/ directory with filename matching workflow_id",
+      "Commit to git \u2014 workflow JSON is the version of record"
+    ],
+    "import_process": [
+      "In n8n UI: Workflows \u2192 Import from File",
+      "Select JSON file from workflows/",
+      "Activate workflow after import"
+    ],
+    "automated_import": "Workflows volume mounted read-only at /home/node/.n8n/workflows/ \u2014 n8n auto-imports on startup if files present",
+    "files": {
+      "workflows/broker_discovery_orchestrator.json": "WF-001",
+      "workflows/source_github_big_ass_list.json": "WF-002",
+      "workflows/source_eff_ssd.json": "WF-003",
+      "workflows/source_custom_url.json": "WF-004",
+      "workflows/discovery_notify.json": "WF-005"
+    }
+  },
+  "setup_checklist": [
+    "1. Access n8n UI at http://{host}:5678 with N8N_BASIC_AUTH_USER/PASSWORD credentials",
+    "2. Verify WEBHOOK_URL environment variable resolves to http://api:8000",
+    "3. Verify N8N_WEBHOOK_SECRET is set and matches value in HomeGuard .env",
+    "4. Import all 5 workflow JSON files from workflows/ directory",
+    "5. Activate WF-001 through WF-005 (WF-004 remains inactive by default)",
+    "6. Manually trigger WF-001 once with dry_run=true to verify source connectivity",
+    "7. Manually trigger WF-001 once in live mode to seed initial broker registry",
+    "8. Verify broker count in HomeGuard dashboard registry view"
+  ]
+}

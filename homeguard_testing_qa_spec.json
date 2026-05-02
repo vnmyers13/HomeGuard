@@ -1,0 +1,955 @@
+{
+  "document": "HomeGuard Privacy Platform \u2014 Testing & QA Specification",
+  "version": "1.0",
+  "date": "May 2026",
+  "frameworks": {
+    "backend": "pytest 8.x with pytest-asyncio, pytest-cov, testcontainers",
+    "frontend": "Vitest 1.x with @testing-library/react, @testing-library/user-event, msw",
+    "e2e": "Playwright Test Runner (@playwright/test) \u2014 full-stack E2E against running Docker Compose stack",
+    "database": "PostgreSQL via testcontainers-python (real DB, not SQLite)",
+    "test_doubles": "Fake Playwright service (FastAPI), aiosmtpd (fake SMTP), imaplib mock for IMAP",
+    "e2e_package": "@playwright/test \u2014 separate from playwright python package used by the playwright service"
+  },
+  "design_decisions": {
+    "frameworks": "pytest for all Python (API, Celery tasks, Mailwatcher, executor logic) + Vitest for React (components, hooks, stores) + Playwright Test Runner for E2E flows against the live Docker Compose stack",
+    "database": "testcontainers-python spins up real PostgreSQL per test session \u2014 pgcrypto and UUID functions work correctly",
+    "test_doubles": "Fake Playwright FastAPI service returns structured JobResult JSON. aiosmtpd provides real SMTP server in-process. IMAP mocked via unittest.mock.",
+    "quality_gates": "Coverage targets (80% line) + named critical path tests that must all pass for a green build"
+  },
+  "directory_structure": {
+    "tests/": {
+      "conftest.py": "Root conftest \u2014 testcontainers DB setup, shared fixtures, fake service factories",
+      "unit/": {
+        "api/": {
+          "test_auth.py": "JWT generation, validation, expiry, revocation",
+          "test_profiles.py": "Profile CRUD, field versioning, archive sequence",
+          "test_brokers.py": "Registry upsert, playbook activation, HMAC webhook auth",
+          "test_scans.py": "Scan run creation, result aggregation, SSE event publishing",
+          "test_requests.py": "Request lifecycle, follow-up scheduling, resubmit logic",
+          "test_reports.py": "Exposure score calculation, audit log query, export generation",
+          "test_notifications.py": "Notification creation, WebSocket fanout"
+        },
+        "workers/": {
+          "test_scan_tasks.py": "dispatch_daily_scan, scan_broker, compute_post_scan_analytics",
+          "test_request_tasks.py": "execute_removal_request, submit_web_form_optout, send_removal_email, generate_legal_letter, followup logic",
+          "test_maintenance_tasks.py": "purge_expired_screenshots, compute_disk_usage",
+          "test_registry_tasks.py": "upsert_broker_from_discovery, check_broker_opt_out_urls"
+        },
+        "mailwatcher/": {
+          "test_email_parser.py": "ParsedEmail extraction, body decoding, link extraction",
+          "test_classifier.py": "Keyword pre-filter, regex matching, confidence scoring, all 4 classification types",
+          "test_request_matcher.py": "Domain match, subject scoring, confidence calculation, ambiguous match",
+          "test_link_extractor.py": "Verification URL detection, positive/negative scoring, dispatch trigger",
+          "test_patterns.py": "patterns.yml loading, hot-reload on mtime change, invalid regex rejection"
+        },
+        "playwright/": {
+          "test_token_resolver.py": "All 16 token substitutions, missing token behaviour, SafeDict",
+          "test_confirmation.py": "Text match, URL match, match_strategy=any/all, negative patterns",
+          "test_error_classifier.py": "All 10 error types correctly classified from exceptions",
+          "test_screenshot_path.py": "Path builder output format, directory creation",
+          "test_playbook_validator.py": "Valid/invalid playbooks against JSON Schema"
+        }
+      },
+      "integration/": {
+        "test_api_auth_flow.py": "Login \u2192 JWT \u2192 protected endpoint \u2192 logout \u2192 token rejected",
+        "test_profile_lifecycle.py": "Create profile \u2192 add fields \u2192 pause \u2192 unpause \u2192 archive delete",
+        "test_scan_to_removal.py": "Trigger scan \u2192 exposure created \u2192 removal request dispatched \u2192 status updated",
+        "test_email_response_flow.py": "Fake SMTP receives email \u2192 Mailwatcher classifies \u2192 request status updated",
+        "test_webhook_upsert.py": "Signed n8n payload \u2192 broker upserted \u2192 unsigned payload rejected",
+        "test_verification_flow.py": "Removal confirmed \u2192 verification scan scheduled \u2192 re-listing detected",
+        "test_legal_letter_flow.py": "CCPA broker detected \u2192 PDF generated \u2192 email sent \u2192 audit record created",
+        "test_pagination.py": "Cursor pagination on requests, audit_log, scan_results endpoints"
+      }
+    },
+    "frontend/src/__tests__/": {
+      "stores/": {
+        "authStore.test.js": "Login sets token, logout clears token, no persistence to localStorage",
+        "notificationStore.test.js": "addNotification increments count, markRead decrements",
+        "scanProgressStore.test.js": "updateProgress, completeScan, clearProgress state transitions",
+        "themeStore.test.js": "Toggle adds/removes dark class on documentElement, persists to localStorage"
+      },
+      "hooks/": {
+        "useWebSocket.test.js": "Connect on auth, disconnect on logout, ping/pong, reconnect on close",
+        "useScanSSE.test.js": "EventSource opens when activeScanRunId set, closes on complete",
+        "useAuth.test.js": "Redirect to /login when no token, redirect to state.from after login"
+      },
+      "components/": {
+        "StatusBadge.test.jsx": "All 8 status values render correct colour and label",
+        "ScoreGauge.test.jsx": "Correct stroke-dashoffset for score 0, 50, 100. Colour changes at thresholds.",
+        "DataTable.test.jsx": "Sort, filter, pagination controls, empty state, loading skeleton",
+        "RequestStatusTimeline.test.jsx": "Renders all status transitions in order, formats timestamps"
+      },
+      "pages/": {
+        "LoginPage.test.jsx": "Form submission calls login, shows error on 401, redirects on success",
+        "DashboardPage.test.jsx": "Renders stats cards, profile gauges, scan progress bar visibility",
+        "RequestTrackerPage.test.jsx": "Filter tabs change query, row expansion shows timeline, resubmit button",
+        "OnboardingPage.test.jsx": "Step progression, form validation per step, first scan trigger"
+      }
+    },
+    "e2e/": {
+      "playwright.config.ts": "Base URL, browser config, test timeouts, screenshot on failure",
+      "fixtures/": {
+        "auth.fixture.ts": "Logs in via UI and stores auth state. Reused across tests.",
+        "stack.fixture.ts": "Verifies Docker Compose stack is running before E2E suite starts"
+      },
+      "tests/": {
+        "auth.spec.ts": "Login flow, token expiry redirect, logout",
+        "onboarding.spec.ts": "Full 5-step onboarding wizard \u2014 creates profile, verifies email config, triggers first scan",
+        "scan_flow.spec.ts": "Trigger manual scan \u2192 progress bar updates \u2192 results appear in dashboard",
+        "request_tracker.spec.ts": "Filter by status, expand row to see timeline, resubmit button",
+        "reports.spec.ts": "Exposure score chart renders, export PDF/CSV downloads file",
+        "broker_registry.spec.ts": "Search broker, deactivate broker, activate playbook version",
+        "notifications.spec.ts": "Bell badge increments on new notification, mark all read clears badge",
+        "system_health.spec.ts": "All service cards show healthy status after stack startup"
+      }
+    }
+  },
+  "backend_test_infrastructure": {
+    "conftest_root": {
+      "file": "tests/conftest.py",
+      "fixtures": {
+        "pg_container": {
+          "scope": "session",
+          "description": "Starts PostgreSQL 15 testcontainer once per test session. Runs Alembic migrations. Tears down after all tests.",
+          "implementation": "from testcontainers.postgres import PostgresContainer; container = PostgresContainer('postgres:15-alpine'); container.start()"
+        },
+        "db_session": {
+          "scope": "function",
+          "description": "Async SQLAlchemy session per test. Wraps each test in a transaction that rolls back on teardown \u2014 tests never persist state to each other.",
+          "implementation": "async with engine.begin() as conn: await conn.run_sync(lambda c: c.execute('SAVEPOINT test_sp')); yield session; await conn.run_sync(lambda c: c.execute('ROLLBACK TO SAVEPOINT test_sp'))"
+        },
+        "test_client": {
+          "scope": "function",
+          "description": "FastAPI TestClient with DB session overridden to use test transaction session",
+          "implementation": "app.dependency_overrides[get_db] = lambda: db_session; client = AsyncClient(app=app, base_url='http://test')"
+        },
+        "admin_token": {
+          "scope": "function",
+          "description": "JWT token for admin user \u2014 created fresh per test",
+          "implementation": "Create admin user in test DB, call POST /api/auth/login, return token"
+        },
+        "member_token": {
+          "scope": "function",
+          "description": "JWT token for member user linked to a test profile"
+        },
+        "fake_playwright_service": {
+          "scope": "session",
+          "description": "Starts a lightweight FastAPI server on a random port that simulates the Playwright microservice. Returns configurable JobResult responses.",
+          "implementation": "uvicorn.Server with FakePLaywrightApp in a background thread. PLAYWRIGHT_SERVICE_URL overridden in env.",
+          "configurable_responses": {
+            "set_scan_outcome": "fake_playwright.set_next_outcome('found', fields=['address','phone'])",
+            "set_optout_outcome": "fake_playwright.set_next_outcome('confirmed')",
+            "set_captcha": "fake_playwright.set_captcha_blocked(True)",
+            "set_error": "fake_playwright.set_error('selector_not_found')"
+          }
+        },
+        "fake_smtp_server": {
+          "scope": "session",
+          "description": "aiosmtpd SMTP server on random port. Captures sent emails for assertion.",
+          "implementation": "aiosmtpd.controller.Controller(EmailHandler(), hostname='127.0.0.1', port=0)",
+          "assertion_helpers": {
+            "get_sent_emails": "Returns list of email.message.Message objects received",
+            "assert_email_sent_to": "Assert at least one email sent to specified address",
+            "assert_subject_contains": "Assert email subject contains string",
+            "assert_attachment_present": "Assert PDF attachment present on email"
+          }
+        },
+        "test_profile": {
+          "scope": "function",
+          "description": "Creates a complete test profile with fields in the test DB",
+          "data": {
+            "full_legal_name": "Test User HomeGuard",
+            "date_of_birth": "1985-06-15",
+            "fields": [
+              {
+                "field_type": "address",
+                "field_value": "123 Test St, Austin TX 78701",
+                "field_subtype": "home"
+              },
+              {
+                "field_type": "phone",
+                "field_value": "555-000-0001",
+                "field_subtype": "mobile"
+              },
+              {
+                "field_type": "email",
+                "field_value": "test@homeguard.test",
+                "field_subtype": "personal"
+              }
+            ]
+          }
+        },
+        "test_broker": {
+          "scope": "function",
+          "description": "Creates a test broker with a simple playbook in the test DB",
+          "data": {
+            "canonical_domain": "testbroker.homeguard.test",
+            "display_name": "Test Broker",
+            "category": "people_search",
+            "removal_method": "web_form",
+            "opt_out_url": "https://testbroker.homeguard.test/optout",
+            "is_active": true
+          }
+        }
+      }
+    },
+    "pytest_config": {
+      "file": "pytest.ini",
+      "content": {
+        "asyncio_mode": "auto",
+        "testpaths": "tests",
+        "addopts": "--cov=api --cov=workers --cov=mailwatcher --cov=playwright --cov-report=term-missing --cov-fail-under=80",
+        "markers": {
+          "unit": "Fast tests with no external dependencies",
+          "integration": "Tests requiring testcontainers DB and fake services",
+          "critical": "Critical path tests that must pass for a green build"
+        }
+      }
+    }
+  },
+  "unit_test_specifications": {
+    "test_auth": {
+      "file": "tests/unit/api/test_auth.py",
+      "tests": [
+        {
+          "name": "test_login_returns_token_on_valid_credentials",
+          "arrange": "Create user in DB with bcrypt-hashed password",
+          "act": "POST /api/auth/login with correct username/password",
+          "assert": "200 OK, response.data.token is valid JWT, response.data.role == admin"
+        },
+        {
+          "name": "test_login_returns_401_on_wrong_password",
+          "act": "POST /api/auth/login with correct username, wrong password",
+          "assert": "401, error_code == invalid_credentials"
+        },
+        {
+          "name": "test_login_rate_limit_after_10_attempts",
+          "act": "POST /api/auth/login 11 times with wrong credentials",
+          "assert": "First 10 return 401, 11th returns 429"
+        },
+        {
+          "name": "test_protected_endpoint_rejects_no_token",
+          "act": "GET /api/profiles with no Authorization header",
+          "assert": "401, error_code == token_missing"
+        },
+        {
+          "name": "test_protected_endpoint_rejects_expired_token",
+          "arrange": "Generate JWT with exp = now() - 1 second",
+          "act": "GET /api/profiles with expired token",
+          "assert": "401, error_code == token_expired"
+        },
+        {
+          "name": "test_logout_revokes_token",
+          "arrange": "Login and get token",
+          "act": "POST /api/auth/logout with token, then GET /api/profiles with same token",
+          "assert": "Logout returns 200, subsequent request returns 401 error_code == token_revoked"
+        },
+        {
+          "name": "test_member_cannot_access_admin_endpoint",
+          "arrange": "Login as member user",
+          "act": "POST /api/profiles with member token",
+          "assert": "403, error_code == forbidden"
+        }
+      ]
+    },
+    "test_classifier": {
+      "file": "tests/unit/mailwatcher/test_classifier.py",
+      "tests": [
+        {
+          "name": "test_confirmed_removal_classification",
+          "arrange": "ParsedEmail with body: 'Your information has been successfully removed from our database'",
+          "assert": "classification == confirmed_removal, confidence >= 0.5"
+        },
+        {
+          "name": "test_rejection_classification",
+          "arrange": "ParsedEmail with body: 'We are unable to process your removal request at this time'",
+          "assert": "classification == rejection"
+        },
+        {
+          "name": "test_info_requested_classification",
+          "arrange": "ParsedEmail with body: 'Please provide a copy of your government-issued ID to verify your identity'",
+          "assert": "classification == info_requested"
+        },
+        {
+          "name": "test_verification_link_classification",
+          "arrange": "ParsedEmail with body containing: 'Click the link below to confirm your opt-out request https://broker.com/verify?token=abc123'",
+          "assert": "classification == verification_link, contains_verification_link == True, verification_link_url == https://broker.com/verify?token=abc123"
+        },
+        {
+          "name": "test_unclassified_on_no_keyword_match",
+          "arrange": "ParsedEmail with body: 'Thank you for contacting us. We will respond within 5 business days.'",
+          "assert": "classification == unclassified"
+        },
+        {
+          "name": "test_keyword_prefilter_eliminates_irrelevant",
+          "arrange": "ParsedEmail with body: 'Your subscription renewal is due next month'",
+          "assert": "classification == unclassified, matched_keywords == []"
+        },
+        {
+          "name": "test_verification_link_takes_priority_over_confirmed",
+          "arrange": "ParsedEmail body contains both confirmation language AND a verification link",
+          "assert": "classification == verification_link (priority order respected)"
+        },
+        {
+          "name": "test_broker_override_patterns_applied",
+          "arrange": "patterns.yml with broker_overrides for testbroker.homeguard.test, email from_domain == testbroker.homeguard.test",
+          "assert": "Broker-specific patterns checked first"
+        },
+        {
+          "name": "test_patterns_hot_reload",
+          "arrange": "Load patterns, modify patterns.yml file, advance mock mtime",
+          "assert": "Classifier reloads and uses new patterns on next call"
+        }
+      ]
+    },
+    "test_token_resolver": {
+      "file": "tests/unit/playwright/test_token_resolver.py",
+      "tests": [
+        {
+          "name": "test_all_16_tokens_resolved",
+          "arrange": "Full profile_tokens dict with all values",
+          "assert": "All {token} placeholders replaced correctly"
+        },
+        {
+          "name": "test_missing_token_returns_empty_string",
+          "arrange": "profile_tokens missing city key",
+          "assert": "{city} replaced with empty string, warning logged"
+        },
+        {
+          "name": "test_nested_url_template_resolution",
+          "arrange": "url_template with {first_name} and {state}",
+          "assert": "Both tokens resolved in URL string"
+        },
+        {
+          "name": "test_fill_form_values_all_resolved",
+          "arrange": "values: {'#name': '{full_name}', '#email': '{removal_email}'}",
+          "assert": "Both values resolved"
+        },
+        {
+          "name": "test_city_parsed_from_address",
+          "arrange": "address = '123 Main St, Denver CO 80203'",
+          "assert": "{city} resolves to Denver, {state} to CO, {zip} to 80203"
+        }
+      ]
+    },
+    "test_scan_broker_task": {
+      "file": "tests/unit/workers/test_scan_tasks.py",
+      "tests": [
+        {
+          "name": "test_scan_broker_found_creates_exposure",
+          "arrange": "fake_playwright returns outcome=found, fields=['address','phone']",
+          "assert": "scan_result created with result_status=found, exposure row created, execute_removal_request dispatched"
+        },
+        {
+          "name": "test_scan_broker_not_found_no_exposure",
+          "arrange": "fake_playwright returns outcome=not_found",
+          "assert": "scan_result created with result_status=not_found, no exposure row, no removal task dispatched"
+        },
+        {
+          "name": "test_scan_broker_captcha_blocks_and_flags",
+          "arrange": "fake_playwright returns outcome=captcha_blocked",
+          "assert": "scan_result=captcha_blocked, broker.captcha_required set True, action_required notification created"
+        },
+        {
+          "name": "test_scan_broker_retries_on_timeout",
+          "arrange": "fake_playwright raises timeout error twice then returns not_found",
+          "assert": "scan_result=not_found after 2 retries, retry_count=2"
+        },
+        {
+          "name": "test_scan_broker_max_retries_marks_error",
+          "arrange": "fake_playwright raises timeout error 4 times",
+          "assert": "scan_result=error after 3 retries, scan_run.failed_brokers incremented"
+        },
+        {
+          "name": "test_scan_idempotent_on_same_run",
+          "arrange": "Run scan_broker twice with same (profile_id, broker_id, scan_run_id)",
+          "assert": "Only one scan_result row created"
+        }
+      ]
+    }
+  },
+  "integration_test_specifications": {
+    "test_scan_to_removal_flow": {
+      "file": "tests/integration/test_scan_to_removal.py",
+      "description": "Full scan \u2192 exposure \u2192 removal request chain using real DB and fake Playwright service",
+      "tests": [
+        {
+          "name": "test_full_scan_to_web_form_removal",
+          "steps": [
+            "Configure fake_playwright to return outcome=found for test_broker",
+            "POST /api/scans {profile_id, broker_id, run_type: manual}",
+            "Wait for Celery tasks to complete (pytest-celery eager mode)",
+            "Assert scan_result row exists with result_status=found",
+            "Assert exposure row exists with is_active=True",
+            "Assert removal_request row exists with status=submitted",
+            "Assert audit_log contains removal_initiated and removal_submitted events"
+          ],
+          "marks": [
+            "integration",
+            "critical"
+          ]
+        },
+        {
+          "name": "test_email_confirmed_removal_triggers_verification_schedule",
+          "steps": [
+            "Create removal_request with status=submitted",
+            "Simulate Mailwatcher classification: confirmed_removal",
+            "Assert request.status=confirmed_removed, confirmed_at set",
+            "Assert verification_scans row created with scheduled_for ~14 days from now",
+            "Assert removal_confirmed notification created"
+          ],
+          "marks": [
+            "integration",
+            "critical"
+          ]
+        },
+        {
+          "name": "test_verification_scan_detects_relisting",
+          "steps": [
+            "Create confirmed_removed request",
+            "Configure fake_playwright to return found on verification scan",
+            "Run dispatch_verification_scan task",
+            "Assert verification_scan.outcome=still_listed",
+            "Assert relisting_events row created",
+            "Assert new removal_request created with parent_request_id set to original",
+            "Assert relisting_detected notification created"
+          ],
+          "marks": [
+            "integration",
+            "critical"
+          ]
+        },
+        {
+          "name": "test_followup_escalates_after_3_attempts",
+          "steps": [
+            "Create submitted removal_request",
+            "Run followup_removal_request 3 times",
+            "Assert followup_count=3, status=requires_manual",
+            "Assert action_required notification created"
+          ],
+          "marks": [
+            "integration",
+            "critical"
+          ]
+        }
+      ]
+    },
+    "test_email_flow": {
+      "file": "tests/integration/test_email_response_flow.py",
+      "tests": [
+        {
+          "name": "test_removal_email_sent_via_smtp",
+          "steps": [
+            "Create submitted removal_request with method=email",
+            "Run send_removal_email task with fake_smtp_server",
+            "Assert fake_smtp received exactly 1 email",
+            "Assert email to: address matches broker.contact_email",
+            "Assert email subject contains broker display_name",
+            "Assert audit_log contains removal_email_sent"
+          ],
+          "marks": [
+            "integration",
+            "critical"
+          ]
+        },
+        {
+          "name": "test_ccpa_letter_generated_and_sent",
+          "steps": [
+            "Create broker with ccpa_applicable=True",
+            "Run generate_and_send_legal_letter task",
+            "Assert PDF file created on screenshots volume",
+            "Assert fake_smtp received email with PDF attachment",
+            "Assert audit_log contains legal_letter_generated"
+          ],
+          "marks": [
+            "integration"
+          ]
+        },
+        {
+          "name": "test_verification_link_auto_dispatched",
+          "steps": [
+            "Create pending removal_request",
+            "Simulate Mailwatcher receiving verification_link email",
+            "Assert click_verification_link Celery task dispatched with correct URL",
+            "Assert mail.message_classifications row created with contains_verification_link=True"
+          ],
+          "marks": [
+            "integration",
+            "critical"
+          ]
+        }
+      ]
+    },
+    "test_webhook_security": {
+      "file": "tests/integration/test_webhook_upsert.py",
+      "tests": [
+        {
+          "name": "test_valid_signed_payload_upserts_brokers",
+          "steps": [
+            "Build payload with 3 broker objects",
+            "Compute valid HMAC-SHA256 signature",
+            "POST to /api/webhooks/n8n with signature header",
+            "Assert 200 OK, upserted=3",
+            "Assert 3 broker rows in registry"
+          ]
+        },
+        {
+          "name": "test_unsigned_payload_rejected",
+          "steps": [
+            "POST to /api/webhooks/n8n with no X-Homeguard-Signature header"
+          ],
+          "assert": "401, error_code=webhook_auth_failed"
+        },
+        {
+          "name": "test_wrong_signature_rejected",
+          "steps": [
+            "POST with signature computed with wrong secret"
+          ],
+          "assert": "401, error_code=webhook_auth_failed"
+        },
+        {
+          "name": "test_duplicate_domain_upserts_not_inserts",
+          "steps": [
+            "POST broker with canonical_domain=spokeo.com",
+            "POST same domain again with updated display_name",
+            "Assert only 1 row in registry.brokers for spokeo.com",
+            "Assert display_name updated"
+          ]
+        }
+      ]
+    }
+  },
+  "frontend_test_specifications": {
+    "vitest_config": {
+      "file": "frontend/vite.config.js (test section)",
+      "config": {
+        "test": {
+          "environment": "jsdom",
+          "globals": true,
+          "setupFiles": "./src/__tests__/setup.js",
+          "coverage": {
+            "provider": "v8",
+            "thresholds": {
+              "lines": 75,
+              "functions": 75,
+              "branches": 70
+            }
+          }
+        }
+      }
+    },
+    "setup_file": {
+      "file": "frontend/src/__tests__/setup.js",
+      "content": [
+        "import '@testing-library/jest-dom'",
+        "Setup MSW (Mock Service Worker) server for API mocking",
+        "Reset MSW handlers before each test",
+        "Mock window.WebSocket with jest.fn()",
+        "Mock EventSource with jest.fn()"
+      ]
+    },
+    "msw_handlers": {
+      "description": "Mock Service Worker API handlers used across frontend tests",
+      "file": "frontend/src/__tests__/mocks/handlers.js",
+      "handlers": [
+        "GET /api/auth/me \u2192 { success: true, data: { id, username, role: admin } }",
+        "POST /api/auth/login \u2192 { success: true, data: { token: test_token, role: admin } }",
+        "GET /api/profiles \u2192 { success: true, data: [testProfile], count: 1 }",
+        "GET /api/system/stats \u2192 { success: true, data: { total_active_exposures: 3, ... } }",
+        "GET /api/system/health \u2192 { success: true, data: { status: healthy, ... } }",
+        "GET /api/notifications \u2192 { success: true, data: [], pagination: { ... } }"
+      ]
+    },
+    "component_tests": {
+      "StatusBadge": {
+        "file": "frontend/src/__tests__/components/StatusBadge.test.jsx",
+        "tests": [
+          "Renders 'Removed' label with green classes for confirmed_removed",
+          "Renders 'Action Required' label with red classes for requires_manual",
+          "Renders 'Pending' with amber for pending_confirmation",
+          "All 8 status values render without throwing"
+        ]
+      },
+      "ScoreGauge": {
+        "file": "frontend/src/__tests__/components/ScoreGauge.test.jsx",
+        "tests": [
+          "score=100 renders full circle (stroke-dashoffset=0)",
+          "score=0 renders empty circle (stroke-dashoffset=circumference)",
+          "score=75 renders in blue colour range",
+          "score=30 renders in red colour range",
+          "showLabel=true renders numeric score text",
+          "animate=true adds CSS transition class"
+        ]
+      },
+      "LoginPage": {
+        "file": "frontend/src/__tests__/pages/LoginPage.test.jsx",
+        "tests": [
+          "Renders username and password inputs",
+          "Submit calls POST /api/auth/login with credentials",
+          "On success: authStore.token set, redirect to /dashboard",
+          "On 401: shows error message 'Invalid username or password'",
+          "On 429: shows rate limit message",
+          "Submit button disabled while request in flight"
+        ]
+      },
+      "DashboardPage": {
+        "file": "frontend/src/__tests__/pages/DashboardPage.test.jsx",
+        "tests": [
+          "Renders 4 stats cards with values from system/stats API",
+          "Renders ScoreGauge for each profile from profiles API",
+          "ScanProgressBar not visible when no activeScanRunId",
+          "ScanProgressBar visible when scanProgressStore.activeScanRunId is set",
+          "Admin user sees ScanTriggerButton",
+          "Member user does not see ScanTriggerButton"
+        ]
+      }
+    },
+    "store_tests": {
+      "authStore": {
+        "tests": [
+          "Initial state: token=null, isAuthenticated=false",
+          "login() sets token and user, isAuthenticated=true",
+          "logout() clears token and user, isAuthenticated=false",
+          "Token never stored in localStorage (spy on localStorage.setItem \u2014 never called)"
+        ]
+      },
+      "themeStore": {
+        "tests": [
+          "Default theme is light",
+          "toggle() changes light to dark, adds 'dark' class to document.documentElement",
+          "toggle() changes dark to light, removes 'dark' class",
+          "Theme persisted to localStorage key 'homeguard_theme'",
+          "On init: reads from localStorage if present"
+        ]
+      }
+    }
+  },
+  "quality_gates": {
+    "coverage_targets": {
+      "backend_line_coverage": "80% minimum (--cov-fail-under=80 in pytest.ini)",
+      "frontend_line_coverage": "75% minimum (thresholds in vitest config)",
+      "frontend_branch_coverage": "70% minimum",
+      "exclusions": [
+        "scripts/",
+        "migrations/",
+        "conftest.py",
+        "*.test.*",
+        "main.jsx"
+      ]
+    },
+    "critical_paths": {
+      "description": "These test cases must ALL pass for a build to be considered green, regardless of coverage percentage",
+      "paths": [
+        {
+          "id": "CP-01",
+          "name": "Authentication gate",
+          "tests": [
+            "test_login_returns_token_on_valid_credentials",
+            "test_protected_endpoint_rejects_no_token",
+            "test_logout_revokes_token"
+          ],
+          "rationale": "If auth is broken the entire system is either locked out or wide open"
+        },
+        {
+          "id": "CP-02",
+          "name": "Scan detects and triggers removal",
+          "tests": [
+            "test_full_scan_to_web_form_removal"
+          ],
+          "rationale": "Core value proposition \u2014 scan finds data, removal request dispatched"
+        },
+        {
+          "id": "CP-03",
+          "name": "Email confirmed removal triggers verification",
+          "tests": [
+            "test_email_confirmed_removal_triggers_verification_schedule"
+          ],
+          "rationale": "Removal lifecycle must close the loop with independent verification"
+        },
+        {
+          "id": "CP-04",
+          "name": "Re-listing detected and re-acted upon",
+          "tests": [
+            "test_verification_scan_detects_relisting"
+          ],
+          "rationale": "Re-listing detection is a core differentiator \u2014 must always work"
+        },
+        {
+          "id": "CP-05",
+          "name": "Follow-up escalation works",
+          "tests": [
+            "test_followup_escalates_after_3_attempts"
+          ],
+          "rationale": "Prevents requests silently stalling forever without human awareness"
+        },
+        {
+          "id": "CP-06",
+          "name": "Webhook authentication enforced",
+          "tests": [
+            "test_valid_signed_payload_upserts_brokers",
+            "test_unsigned_payload_rejected"
+          ],
+          "rationale": "Unsigned webhook must be rejected \u2014 prevents registry poisoning"
+        },
+        {
+          "id": "CP-07",
+          "name": "PII encryption round-trip",
+          "tests": [
+            "test_profile_pii_encrypted_at_rest",
+            "test_profile_pii_decryptable_with_correct_key"
+          ],
+          "rationale": "PII must be unreadable in DB without key \u2014 foundational privacy guarantee"
+        },
+        {
+          "id": "CP-08",
+          "name": "Audit log append-only",
+          "tests": [
+            "test_audit_log_cannot_be_updated",
+            "test_audit_log_cannot_be_deleted"
+          ],
+          "rationale": "Compliance record integrity \u2014 must be provably tamper-resistant"
+        },
+        {
+          "id": "CP-09",
+          "name": "Email classification correctness",
+          "tests": [
+            "test_confirmed_removal_classification",
+            "test_verification_link_classification",
+            "test_unclassified_on_no_keyword_match"
+          ],
+          "rationale": "Misclassification causes wrong status updates \u2014 high-stakes correctness"
+        },
+        {
+          "id": "CP-10",
+          "name": "Frontend auth never touches localStorage",
+          "tests": [
+            "Token never stored in localStorage"
+          ],
+          "rationale": "JWT in localStorage is a known XSS attack vector \u2014 must never happen"
+        },
+        {
+          "id": "CP-11",
+          "name": "Onboarding wizard end-to-end",
+          "tests": [
+            "completes full 5-step onboarding wizard"
+          ],
+          "rationale": "First-run experience must work perfectly \u2014 broken onboarding blocks all usage"
+        },
+        {
+          "id": "CP-12",
+          "name": "Scan progress live update",
+          "tests": [
+            "manual scan shows live progress and populates results"
+          ],
+          "rationale": "SSE + WebSocket real-time updates are core UX \u2014 must work in a real browser"
+        },
+        {
+          "id": "CP-13",
+          "name": "Notification WebSocket push",
+          "tests": [
+            "notification bell updates on new exposure"
+          ],
+          "rationale": "Live notification delivery via WebSocket must work end-to-end in real browser"
+        }
+      ]
+    },
+    "run_commands": {
+      "backend_all": "pytest tests/ -v --tb=short",
+      "backend_unit_only": "pytest tests/unit/ -v -m unit",
+      "backend_integration_only": "pytest tests/integration/ -v -m integration",
+      "backend_critical_only": "pytest tests/ -v -m critical",
+      "backend_coverage": "pytest tests/ --cov=api --cov=workers --cov=mailwatcher --cov=playwright --cov-report=html",
+      "frontend_all": "cd frontend && npx vitest run",
+      "frontend_coverage": "cd frontend && npx vitest run --coverage",
+      "frontend_watch": "cd frontend && npx vitest",
+      "all_tests": "pytest tests/ && cd frontend && npx vitest run && cd ../e2e && npx playwright test",
+      "e2e_all": "cd e2e && npx playwright test",
+      "e2e_critical": "cd e2e && npx playwright test --grep @critical",
+      "e2e_headed": "cd e2e && npx playwright test --headed --slowMo=500",
+      "e2e_report": "cd e2e && npx playwright show-report"
+    }
+  },
+  "test_data_seeding": {
+    "description": "Fixtures for creating consistent test data across all test modules",
+    "file": "tests/fixtures/seed_data.py",
+    "available_factories": {
+      "make_profile": "Creates profile with encrypted PII fields. Params: name, num_addresses, num_phones, is_paused.",
+      "make_broker": "Creates broker with playbook. Params: category, removal_method, captcha_required, is_active.",
+      "make_scan_run": "Creates completed scan run with results. Params: num_found, num_not_found, num_errors.",
+      "make_removal_request": "Creates request at specified status. Params: status, followup_count, method.",
+      "make_exposure": "Creates active or resolved exposure. Params: is_active, fields_detected.",
+      "make_audit_log_entry": "Creates audit log entry. Params: event_type, outcome.",
+      "household_fixture": "Creates complete household \u2014 2 profiles, 10 brokers, mixed scan results and requests."
+    }
+  },
+  "e2e_test_infrastructure": {
+    "description": "Playwright Test Runner executes E2E tests against a fully running Docker Compose test stack",
+    "playwright_config": {
+      "file": "e2e/playwright.config.ts",
+      "config": {
+        "testDir": "./e2e/tests",
+        "baseURL": "http://localhost:3000",
+        "timeout": 30000,
+        "retries": 1,
+        "use": {
+          "headless": true,
+          "screenshot": "only-on-failure",
+          "video": "retain-on-failure",
+          "trace": "on-first-retry"
+        },
+        "projects": [
+          {
+            "name": "chromium",
+            "use": {
+              "browserName": "chromium"
+            }
+          },
+          {
+            "name": "firefox",
+            "use": {
+              "browserName": "firefox"
+            }
+          }
+        ]
+      }
+    },
+    "test_stack_setup": {
+      "description": "E2E tests run against a dedicated test Docker Compose stack with seeded data",
+      "compose_file": "docker-compose.test.yml",
+      "differences_from_prod": [
+        "Uses separate named volumes (homeguard_test_db_data etc.) \u2014 never touches production data",
+        "SCAN_SCHEDULE_CRON=disabled \u2014 no automatic scans during E2E run",
+        "SMTP/IMAP pointed at local aiosmtpd test server",
+        "Playwright proxy URL pointed at fake broker server",
+        "Pre-seeded with 2 test profiles and 20 test brokers via init script"
+      ],
+      "before_all_hook": "global-setup.ts verifies stack health via /api/system/health before any test runs",
+      "after_all_hook": "global-teardown.ts resets DB to seed state via docker compose exec db psql reset script"
+    },
+    "auth_fixture": {
+      "file": "e2e/fixtures/auth.fixture.ts",
+      "description": "Logs in once, saves browser storage state to file. All E2E tests reuse saved auth state \u2014 no repeated login flows.",
+      "implementation": [
+        "Navigate to /login",
+        "Fill username + password",
+        "Click submit, wait for /dashboard",
+        "context.storageState({ path: 'e2e/.auth/admin.json' })",
+        "Tests use: use: { storageState: 'e2e/.auth/admin.json' }"
+      ]
+    },
+    "e2e_test_specifications": {
+      "onboarding_spec": {
+        "file": "e2e/tests/onboarding.spec.ts",
+        "prerequisite": "Fresh stack with no profiles",
+        "tests": [
+          {
+            "name": "completes full 5-step onboarding wizard",
+            "steps": [
+              "Navigate to /onboarding",
+              "Step 1: Verify admin account displayed \u2014 click Continue",
+              "Step 2: Fill profile form (name, address, phone, email) \u2014 click Add Profile",
+              "Step 3: Verify email config shown \u2014 click Send Test Email \u2014 await success indicator",
+              "Step 4: n8n health shown as healthy \u2014 click Continue",
+              "Step 5: Click 'Run first scan now'",
+              "Assert redirected to /dashboard",
+              "Assert scan progress bar visible",
+              "Assert onboarding not shown on next login"
+            ],
+            "marks": [
+              "critical"
+            ]
+          }
+        ]
+      },
+      "scan_flow_spec": {
+        "file": "e2e/tests/scan_flow.spec.ts",
+        "tests": [
+          {
+            "name": "manual scan shows live progress and populates results",
+            "steps": [
+              "Navigate to /dashboard",
+              "Click ScanTriggerButton \u2192 select 'Scan all profiles'",
+              "Assert ScanProgressBar appears with 'Scanning...' text",
+              "Wait for scan_complete SSE event (poll scan status)",
+              "Assert ScanProgressBar disappears",
+              "Navigate to /requests",
+              "Assert at least one removal request row visible"
+            ],
+            "marks": [
+              "critical"
+            ]
+          },
+          {
+            "name": "notification bell updates on new exposure",
+            "steps": [
+              "Note current notification badge count",
+              "Trigger scan that produces a new exposure",
+              "Assert badge count incremented without page refresh (WebSocket push)"
+            ],
+            "marks": [
+              "critical"
+            ]
+          }
+        ]
+      },
+      "request_tracker_spec": {
+        "file": "e2e/tests/request_tracker.spec.ts",
+        "tests": [
+          {
+            "name": "status filter tabs show correct subsets",
+            "steps": [
+              "Navigate to /requests",
+              "Click 'Action Required' tab",
+              "Assert all visible rows have requires_manual status badge",
+              "Click 'Removed' tab",
+              "Assert all visible rows have confirmed_removed status badge"
+            ]
+          },
+          {
+            "name": "row expansion shows full status timeline",
+            "steps": [
+              "Click expand on a removal_request row",
+              "Assert RequestStatusTimeline visible with at least 2 entries",
+              "Assert timestamps displayed in human-readable format"
+            ]
+          }
+        ]
+      },
+      "reports_spec": {
+        "file": "e2e/tests/reports.spec.ts",
+        "tests": [
+          {
+            "name": "exposure score chart renders with data",
+            "steps": [
+              "Navigate to /reports",
+              "Assert Exposure Score tab active by default",
+              "Assert Recharts SVG elements present in DOM",
+              "Select 30d date range \u2014 assert chart re-renders"
+            ]
+          },
+          {
+            "name": "CSV export downloads file",
+            "steps": [
+              "Navigate to /reports \u2192 Audit Log tab",
+              "Click Export CSV",
+              "Assert download initiated (Playwright download event fires)",
+              "Assert downloaded filename ends in .csv"
+            ]
+          }
+        ]
+      }
+    },
+    "fake_broker_server": {
+      "description": "Lightweight HTTP server that mimics broker opt-out pages for E2E testing. Playwright executor scans against this server instead of real broker sites.",
+      "file": "e2e/helpers/fake_broker_server.py",
+      "endpoints": {
+        "GET /search": "Returns HTML page containing test profile name and address (simulates found listing)",
+        "GET /optout": "Returns HTML opt-out form",
+        "POST /optout/submit": "Accepts form POST, returns confirmation HTML: 'Your removal request has been submitted'",
+        "GET /optout/confirm": "Returns confirmation page for URL-pattern confirmation testing",
+        "GET /captcha": "Returns page with .g-recaptcha element (for captcha detection E2E test)"
+      },
+      "startup": "Started as subprocess in global-setup.ts, terminated in global-teardown.ts"
+    }
+  }
+}
