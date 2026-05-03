@@ -1,0 +1,138 @@
+
+Perfect! I've reviewed the HomeGuard Privacy Platform documentation. This is a comprehensive self-hosted personal data broker removal system with 13 specification documents covering a full-stack Docker Compose deployment.
+
+## **Project Overview Summary**
+
+**HomeGuard** is a privacy-focused platform that:
+- Automatically scans 100+ data brokers for personal information exposure
+- Executes automated removal requests without user approval
+- Manages 2-5 household member profiles with encrypted PII
+- Runs entirely self-hosted via Docker Compose (9 services)
+- Uses Playwright for browser automation, Celery for task orchestration, and n8n for broker discovery
+
+**Tech Stack:** Python 3.11/FastAPI, React 18/Vite, PostgreSQL 15, Redis 7, Celery 5, Playwright, n8n
+
+---
+
+## **Proposed Sprint Breakdown for Agent Implementation**
+
+I recommend **8 two-week sprints** organized by vertical slices that deliver end-to-end functionality:
+
+### **Sprint 0: Foundation & Infrastructure (2 weeks)**
+**Goal:** Get the entire stack running with basic scaffolding
+- ✅ Create Docker Compose configuration (9 services + 2 networks + 5 volumes)
+- ✅ Set up PostgreSQL with pgcrypto extension
+- ✅ Create Alembic migration structure for all 9 schemas (34 tables)
+- ✅ Build `init.sh` automated setup script
+- ✅ Configure .env.example with all 30+ environment variables
+- ✅ Verify all services start and communicate
+- **Deliverable:** `docker compose up` brings up healthy stack
+
+### **Sprint 1: Auth & Profile Management (2 weeks)**
+**Goal:** Users can register, login, and manage household profiles
+- ✅ Implement auth schema (users, sessions, households)
+- ✅ Build FastAPI auth router (login, logout, JWT validation)
+- ✅ Implement identity schema (profiles, profile_fields with versioning)
+- ✅ Build profiles API (CRUD + pause/unpause)
+- ✅ Create React auth flow (login, logout, protected routes)
+- ✅ Build profile management UI with field versioning
+- ✅ Write unit tests for auth + profile logic
+- **Deliverable:** Admin can create profiles and manage PII fields
+
+### **Sprint 2: Broker Registry & Discovery (2 weeks)**
+**Goal:** System can discover and manage data broker registry
+- ✅ Implement registry schema (brokers, broker_playbooks, playbook_versions)
+- ✅ Build brokers API router (list, search, playbook upload/activation)
+- ✅ Create n8n workflows (5 workflows for broker discovery)
+- ✅ Implement HMAC-signed webhook endpoint
+- ✅ Build broker registry UI (browse, search, manual overrides)
+- ✅ Seed initial broker dataset
+- ✅ Write integration tests for webhook upsert flow
+- **Deliverable:** n8n can auto-discover brokers and populate registry
+
+### **Sprint 3: Playwright Automation Engine (2 weeks)**
+**Goal:** Headless browser can execute playbooks
+- ✅ Build Playwright microservice (FastAPI on :8001)
+- ✅ Implement browser context pool management
+- ✅ Create all 16 action handlers (navigate, fill, click, extract, etc.)
+- ✅ Build token resolution system (16 interpolation values)
+- ✅ Implement confirmation detection (text + URL patterns)
+- ✅ Add screenshot capture and structured storage
+- ✅ Create CAPTCHA detection and manual escalation
+- ✅ Build fake Playwright service for testing
+- ✅ Write unit tests for action handlers and token resolver
+- **Deliverable:** Playwright service can execute playbook JSON against test broker
+
+### **Sprint 4: Scanning Workflow (2 weeks)**
+**Goal:** System can scan brokers and detect exposures
+- ✅ Implement scanning schema (scan_runs, scan_results, exposures)
+- ✅ Build Celery scanning tasks (dispatch, scan_broker, post-analytics)
+- ✅ Implement chord-based batch scanning (10 brokers/batch)
+- ✅ Create scans API router (trigger scan, SSE progress, results list)
+- ✅ Build exposure score calculation
+- ✅ Create dashboard UI with scan trigger + progress bar
+- ✅ Implement SSE hook for real-time updates
+- ✅ Write critical path test CP-01 (scan flow)
+- **Deliverable:** User can trigger scan and see exposure results
+
+### **Sprint 5: Removal Request Execution (2 weeks)**
+**Goal:** System can automatically submit removal requests
+- ✅ Implement requests schema (removal_requests, request_events)
+- ✅ Build Celery request tasks (execute_removal, web_form, email, legal_letter)
+- ✅ Implement WeasyPrint PDF generation for CCPA/GDPR letters
+- ✅ Create requests API router (list, filter, resubmit, status updates)
+- ✅ Build request lifecycle state machine
+- ✅ Create Request Tracker UI with timeline view
+- ✅ Implement auto-dispatch on exposure detection
+- ✅ Write integration test for scan→removal flow
+- **Deliverable:** Exposures automatically trigger removal requests
+
+### **Sprint 6: Email Response Handling (2 weeks)**
+**Goal:** System can parse broker emails and update request status
+- ✅ Build Mailwatcher service (IMAP polling + classifier)
+- ✅ Implement mail schema (inbound_messages, outbound_messages)
+- ✅ Create patterns.yml with keyword + regex rules
+- ✅ Build request matcher (domain + subject scoring)
+- ✅ Implement verification link extraction and auto-dispatch
+- ✅ Create follow-up scheduling logic (ETA-based)
+- ✅ Build Mailwatcher UI (unclassified messages, manual reclassification)
+- ✅ Write integration test for email→status update flow
+- **Deliverable:** Confirmation emails auto-update request status
+
+### **Sprint 7: Reporting & Monitoring (2 weeks)**
+**Goal:** Users can view analytics and export reports
+- ✅ Implement reporting schema (exposure_snapshots, daily_scores)
+- ✅ Build reports API (exposure trends, re-listing tracker, field breakdown)
+- ✅ Create PDF/CSV export functionality
+- ✅ Implement audit schema and append-only logging
+- ✅ Build System Health monitoring (service status, queue depth, disk usage)
+- ✅ Create analytics dashboard with Recharts visualizations
+- ✅ Implement notification system (WebSocket + Redis pub/sub)
+- ✅ Write E2E test for full critical path CP-01 through CP-04
+- **Deliverable:** Complete dashboard with analytics and export
+
+### **Sprint 8: Security, Testing & Hardening (2 weeks)**
+**Goal:** Production-ready with security hardening and test coverage
+- ✅ Apply security hardening (UFW, fail2ban, permissions)
+- ✅ Implement backup/restore procedures (pg_dump + volume tar + GPG)
+- ✅ Document secret rotation procedures
+- ✅ Achieve 80% backend / 75% frontend test coverage
+- ✅ Complete all 13 critical path E2E tests
+- ✅ Build onboarding wizard UI
+- ✅ Create deployment documentation
+- ✅ Run security verification checklist
+- **Deliverable:** Production-ready system with full test coverage
+
+---
+
+## **Critical Success Factors**
+
+1. **Vertical Slicing:** Each sprint delivers working end-to-end functionality
+2. **Test-Driven:** Critical path tests written alongside features
+3. **Dependencies:** Sprints build on each other (can't skip ahead)
+4. **Parallel Work:** Within sprints, backend/frontend can work in parallel
+5. **Fake Services:** Use test doubles early (fake Playwright, fake SMTP) to unblock
+
+---
+
+

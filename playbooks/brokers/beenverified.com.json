@@ -1,0 +1,33 @@
+{
+  "canonical_domain": "beenverified.com",
+  "complexity": "complex",
+  "search_url_template": "https://www.beenverified.com/search/?q={full_name}",
+  "opt_out_url_template": "https://www.beenverified.com/support/ticket",
+  "estimated_response_days": 30,
+  "phases": [
+    {
+      "name": "search",
+      "url_template": "https://www.beenverified.com/search/?q={full_name}",
+      "on_failure": "skip_phase",
+      "steps": [
+        {"step_id": "navigate_search", "action": "navigate"},
+        {"step_id": "fill_search", "action": "fill_form", "selector": "input[name='q']", "values": {"query": "{full_name}"}},
+        {"step_id": "submit_search", "action": "submit"},
+        {"step_id": "wait_results", "action": "wait", "timeout_ms": 15000},
+        {"step_id": "screenshot_results", "action": "screenshot"}
+      ]
+    },
+    {
+      "name": "opt_out",
+      "url_template": "https://www.beenverified.com/support/ticket",
+      "on_failure": "mark_manual",
+      "steps": [
+        {"step_id": "navigate_ticket", "action": "navigate"},
+        {"step_id": "fill_ticket", "action": "fill_form", "selector": "form", "values": {"subject": "Data Removal Request", "message": "Please remove my data: {full_name} at {address_full}", "email": "{removal_email}"}},
+        {"step_id": "submit_ticket", "action": "submit"},
+        {"step_id": "screenshot_confirmation", "action": "screenshot"}
+      ]
+    }
+  ],
+  "notes": "BeenVerified requires support ticket for removal - complex multi-step process."
+}

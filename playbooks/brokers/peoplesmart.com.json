@@ -1,0 +1,29 @@
+{
+  "canonical_domain": "peoplesmart.com",
+  "complexity": "simple",
+  "search_url_template": "https://peoplesmart.com/search/{full_name}",
+  "opt_out_url_template": "https://peoplesmart.com/opt-out",
+  "estimated_response_days": 7,
+  "phases": [
+    {
+      "name": "search",
+      "url_template": "https://peoplesmart.com/search/{full_name}",
+      "on_failure": "skip_phase",
+      "steps": [
+        {"step_id": "nav", "action": "navigate"},
+        {"step_id": "wait", "action": "wait", "timeout_ms": 8000},
+        {"step_id": "shot", "action": "screenshot"}
+      ]
+    },
+    {
+      "name": "opt_out",
+      "url_template": "https://peoplesmart.com/opt-out",
+      "on_failure": "mark_manual",
+      "steps": [
+        {"step_id": "nav_out", "action": "navigate"},
+        {"step_id": "fill", "action": "fill_form", "selector": "form", "values": {"name": "{full_name}", "email": "{removal_email}"}},
+        {"step_id": "submit", "action": "submit"}
+      ]
+    }
+  ]
+}
