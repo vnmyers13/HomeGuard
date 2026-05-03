@@ -1,0 +1,29 @@
+{
+  "canonical_domain": "spokeo.com",
+  "complexity": "multi_step",
+  "search_url_template": "https://www.spokeo.com/search?q={full_name}&location={city},{state}",
+  "opt_out_url_template": "https://www.spokeo.com/opt-out",
+  "estimated_response_days": 14,
+  "phases": [
+    {
+      "name": "search",
+      "url_template": "https://www.spokeo.com/search?q={full_name}&location={city},{state}",
+      "on_failure": "skip_phase",
+      "steps": [
+        {"step_id": "navigate_search", "action": "navigate"},
+        {"step_id": "wait_results", "action": "wait", "timeout_ms": 10000},
+        {"step_id": "screenshot_results", "action": "screenshot"}
+      ]
+    },
+    {
+      "name": "opt_out",
+      "url_template": "https://www.spokeo.com/opt-out",
+      "on_failure": "mark_manual",
+      "steps": [
+        {"step_id": "navigate_optout", "action": "navigate"},
+        {"step_id": "fill_optout_form", "action": "fill_form", "selector": "form.opt-out-form", "values": {"name": "{full_name}", "email": "{removal_email}", "phone": "{phone_number}"}}
+      ]
+    }
+  ],
+  "notes": "Spokeo requires name, email, and phone for opt-out confirmation."
+}

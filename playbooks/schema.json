@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://homeguard.local/playbook/v1",
+  "title": "HomeGuard Broker Playbook",
+  "description": "Structured playbook for automated data-broker discovery, scanning, and opt-out.",
+  "type": "object",
+  "required": ["canonical_domain", "phases", "complexity"],
+  "properties": {
+    "canonical_domain": {
+      "type": "string",
+      "format": "hostname",
+      "description": "The primary domain of the broker site."
+    },
+    "complexity": {
+      "type": "string",
+      "enum": ["simple", "multi_step", "complex"],
+      "description": "Complexity classification for the playbook."
+    },
+    "search_url_template": {
+      "type": "string",
+      "description": "URL template for searching a profile."
+    },
+    "opt_out_url_template": {
+      "type": "string",
+      "description": "URL template for the opt-out/removal page."
+    },
+    "estimated_response_days": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Expected broker response time in days."
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/phase"
+      }
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "phase": {
+      "type": "object",
+      "required": ["name", "steps"],
+      "properties": {
+        "name": { "type": "string" },
+        "url_template": { "type": "string" },
+        "on_failure": {
+          "type": "string",
+          "enum": ["stop", "skip_phase", "mark_manual"]
+        },
+        "steps": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["action"],
+      "properties": {
+        "step_id": { "type": "string" },
+        "action": {
+          "type": "string",
+          "enum": [
+            "navigate", "wait", "fill_form", "click", "submit",
+            "screenshot", "scroll", "select_option", "check_text",
+            "wait_for_url", "wait_for_selector", "hover", "right_click",
+            "conditional", "upload_file", "accept_dialog", "type_text"
+          ]
+        },
+        "selector": { "type": "string" },
+        "values": { "type": "object" },
+        "timeout_ms": { "type": "integer" },
+        "screenshot": { "type": "boolean" },
+        "url": { "type": "string" },
+        "text": { "type": "string" },
+        "condition_selector": { "type": "string" },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

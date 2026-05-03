@@ -1,0 +1,349 @@
+name: homeguard
+
+networks:
+  homeguard_net:
+    driver: bridge
+    internal: true
+  homeguard_egress:
+    driver: bridge
+
+volumes:
+  homeguard_db_data:
+  homeguard_redis_data:
+  homeguard_n8n_data:
+  homeguard_screenshots:
+  homeguard_logs:
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - homeguard_db_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - homeguard_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - homeguard_redis_data:/data
+    networks:
+      - homeguard_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND_ADDRESS}:8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY_HOURS=${JWT_EXPIRY_HOURS}
+      - PLAYWRIGHT_SERVICE_URL=${PLAYWRIGHT_SERVICE_URL}
+      - PLAYWRIGHT_MIN_DELAY_MS=${PLAYWRIGHT_MIN_DELAY_MS}
+      - PLAYWRIGHT_MAX_DELAY_MS=${PLAYWRIGHT_MAX_DELAY_MS}
+      - REMOVAL_EMAIL=${REMOVAL_EMAIL}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS}
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+      - SCAN_SCHEDULE_CRON=${SCAN_SCHEDULE_CRON}
+      - SCREENSHOT_RETENTION_DAYS=${SCREENSHOT_RETENTION_DAYS}
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE}
+      - LOGIN_RATE_LIMIT_PER_MINUTE=${LOGIN_RATE_LIMIT_PER_MINUTE}
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY}
+    volumes:
+      - homeguard_logs:/app/logs
+      - ./playbooks:/app/playbooks:ro
+      - ./scripts:/app/scripts:ro
+      - ./migrations:/app/migrations
+    networks:
+      - homeguard_net
+      - homeguard_egress
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/system/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A workers.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY}
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY_HOURS=${JWT_EXPIRY_HOURS}
+      - PLAYWRIGHT_SERVICE_URL=${PLAYWRIGHT_SERVICE_URL}
+      - PLAYWRIGHT_MIN_DELAY_MS=${PLAYWRIGHT_MIN_DELAY_MS}
+      - PLAYWRIGHT_MAX_DELAY_MS=${PLAYWRIGHT_MAX_DELAY_MS}
+      - REMOVAL_EMAIL=${REMOVAL_EMAIL}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS}
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+      - SCAN_SCHEDULE_CRON=${SCAN_SCHEDULE_CRON}
+      - SCREENSHOT_RETENTION_DAYS=${SCREENSHOT_RETENTION_DAYS}
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE}
+      - LOGIN_RATE_LIMIT_PER_MINUTE=${LOGIN_RATE_LIMIT_PER_MINUTE}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY}
+    volumes:
+      - homeguard_screenshots:/app/screenshots
+      - homeguard_logs:/app/logs
+      - ./playbooks:/app/playbooks:ro
+    networks:
+      - homeguard_net
+      - homeguard_egress
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  beat:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: celery -A workers.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY_HOURS=${JWT_EXPIRY_HOURS}
+      - PLAYWRIGHT_SERVICE_URL=${PLAYWRIGHT_SERVICE_URL}
+      - REMOVAL_EMAIL=${REMOVAL_EMAIL}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_USE_TLS=${SMTP_USE_TLS}
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+      - SCAN_SCHEDULE_CRON=${SCAN_SCHEDULE_CRON}
+      - SCREENSHOT_RETENTION_DAYS=${SCREENSHOT_RETENTION_DAYS}
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+    networks:
+      - homeguard_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  playwright:
+    build:
+      context: ./playwright
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - PLAYWRIGHT_PROXY_URL=${PLAYWRIGHT_PROXY_URL}
+      - PLAYWRIGHT_MIN_DELAY_MS=${PLAYWRIGHT_MIN_DELAY_MS}
+      - PLAYWRIGHT_MAX_DELAY_MS=${PLAYWRIGHT_MAX_DELAY_MS}
+    volumes:
+      - homeguard_screenshots:/app/screenshots
+      - ./playbooks:/app/playbooks:ro
+    networks:
+      - homeguard_net
+      - homeguard_egress
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    security_opt:
+      - seccomp:unconfined
+    shm_size: "256mb"
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  mailwatcher:
+    build:
+      context: ./mailwatcher
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY}
+      - IMAP_HOST=${IMAP_HOST}
+      - IMAP_PORT=${IMAP_PORT}
+      - IMAP_USER=${IMAP_USER}
+      - IMAP_PASSWORD=${IMAP_PASSWORD}
+      - IMAP_USE_SSL=${IMAP_USE_SSL}
+      - IMAP_POLL_INTERVAL_SECONDS=${IMAP_POLL_INTERVAL_SECONDS}
+      - REMOVAL_EMAIL=${REMOVAL_EMAIL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+    networks:
+      - homeguard_net
+      - homeguard_egress
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND_ADDRESS}:3000:80"
+    networks:
+      - homeguard_net
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    ports:
+      - "${HOST_BIND_ADDRESS}:5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_HOST=n8n.homeguard.local
+      - N8N_PORT=5678
+      - WEBHOOK_URL=http://n8n.homeguard.local:5678/
+      - GENERIC_TIMEZONE=${TIMEZONE}
+      - TZ=${TIMEZONE}
+    volumes:
+      - homeguard_n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/.n8n/workflows:ro
+    networks:
+      - homeguard_net
+      - homeguard_egress
+    depends_on:
+      - api
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

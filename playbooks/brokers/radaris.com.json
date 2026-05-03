@@ -1,0 +1,30 @@
+{
+  "canonical_domain": "radaris.com",
+  "complexity": "multi_step",
+  "search_url_template": "https://radaris.com/search/?q={full_name}",
+  "opt_out_url_template": "https://radaris.com/removals",
+  "estimated_response_days": 10,
+  "phases": [
+    {
+      "name": "search",
+      "url_template": "https://radaris.com/search/?q={full_name}",
+      "on_failure": "skip_phase",
+      "steps": [
+        {"step_id": "nav", "action": "navigate"},
+        {"step_id": "wait", "action": "wait", "timeout_ms": 12000},
+        {"step_id": "shot", "action": "screenshot"}
+      ]
+    },
+    {
+      "name": "opt_out",
+      "url_template": "https://radaris.com/removals",
+      "on_failure": "mark_manual",
+      "steps": [
+        {"step_id": "nav_out", "action": "navigate"},
+        {"step_id": "fill", "action": "fill_form", "selector": "form", "values": {"name": "{full_name}", "email": "{removal_email}"}},
+        {"step_id": "submit", "action": "submit"},
+        {"step_id": "shot", "action": "screenshot"}
+      ]
+    }
+  ]
+}

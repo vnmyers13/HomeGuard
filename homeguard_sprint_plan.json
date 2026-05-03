@@ -1,0 +1,1521 @@
+{
+  "document": "HomeGuard Privacy Platform \u2014 Agent Sprint Plan",
+  "version": "1.0",
+  "date": "May 2026",
+  "description": "Executable sprint plan for a coding agent. Each task specifies exact files to create, implementation notes, and commands to verify completion. 7 sprints of 5 days each.",
+  "total_sprints": 7,
+  "total_tasks": 39,
+  "agent_instructions": {
+    "how_to_use": [
+      "Process tasks in sprint order. Do not start Sprint N+1 until all Sprint N gate_checks pass.",
+      "Each task has a 'verify' block \u2014 run every command before marking done.",
+      "Tasks marked 'blocking: true' must complete before any other task in the same sprint.",
+      "Each task 'reference' field names the source document section to read before coding.",
+      "Commit after each completed task: git add -A && git commit -m 'S{sprint}-T{n}: {title}'"
+    ],
+    "status_values": [
+      "not_started",
+      "in_progress",
+      "blocked",
+      "complete"
+    ],
+    "path_convention": "All paths relative to project root",
+    "env_access": "Read secrets from .env via python-dotenv or os.environ \u2014 never hardcode"
+  },
+  "sprints": [
+    {
+      "sprint": 1,
+      "title": "Foundation & Database Schema",
+      "goal": "Running Docker Compose stack with all 9 schemas migrated, PII encryption verified, broker registry seeded with >= 20 brokers.",
+      "duration_days": 5,
+      "phase_refs": [
+        "Phase 1",
+        "Phase 2"
+      ],
+      "gate_checks": [
+        "docker compose ps shows all 9 services Up",
+        "curl http://localhost:8000/api/system/health returns {status: healthy}",
+        "docker compose exec db psql -U homeguard homeguard -c '\\dn' shows 9 schemas",
+        "SELECT COUNT(*) FROM registry.brokers returns >= 20",
+        "Direct psql SELECT of full_legal_name returns binary (encrypted, not plain text)"
+      ],
+      "tasks": [
+        {
+          "id": "S1-T1",
+          "title": "Initialise git repository and directory structure",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 1,
+          "reference": "DOC-4.file_structure",
+          "description": "Create the repository, all top-level directories, .gitignore, .env.example, and playbooks/schema.json.",
+          "files_to_create": [
+            ".gitignore",
+            ".env.example",
+            "README.md",
+            "api/",
+            "frontend/",
+            "playwright/",
+            "mailwatcher/",
+            "migrations/",
+            "playbooks/brokers/",
+            "playbooks/schema.json",
+            "workflows/",
+            "scripts/",
+            "docker/postgres/",
+            "tests/unit/api/",
+            "tests/unit/workers/",
+            "tests/unit/mailwatcher/",
+            "tests/unit/playwright/",
+            "tests/integration/",
+            "e2e/"
+          ],
+          "implementation_notes": [
+            ".gitignore must include: .env, __pycache__/, *.pyc, .venv/, node_modules/, frontend/dist/, screenshots/, *.log",
+            ".env.example must contain all variables from DOC-4.env_variables with CHANGE_ME placeholders and comments",
+            "playbooks/schema.json must contain the exact JSON Schema from DOC-6.formal_json_schema"
+          ],
+          "verify": {
+            "commands": [
+              "git check-ignore -v .env",
+              "python3 -c \"import json; json.load(open('playbooks/schema.json')); print('schema.json valid')\"",
+              "grep -c CHANGE_ME .env.example"
+            ],
+            "expected": [
+              ".gitignore:.env",
+              "schema.json valid",
+              ">= 10"
+            ]
+          }
+        },
+        {
+          "id": "S1-T2",
+          "title": "Generate all secrets and populate .env",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 0.5,
+          "reference": "DOC-12.secret_generation",
+          "description": "Generate cryptographically strong secrets for every .env variable and set file permissions.",
+          "commands_to_run": [
+            "for key in DB_ENCRYPTION_KEY JWT_SECRET N8N_WEBHOOK_SECRET INTERNAL_SERVICE_TOKEN; do echo \"$key=$(openssl rand -hex 32)\"; done",
+            "for key in POSTGRES_PASSWORD REDIS_PASSWORD; do echo \"$key=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)\"; done",
+            "cp .env.example .env && chmod 600 .env"
+          ],
+          "verify": {
+            "commands": [
+              "grep -c CHANGE_ME .env",
+              "stat -c '%a' .env"
+            ],
+            "expected": [
+              "0",
+              "600"
+            ]
+          }
+        },
+        {
+          "id": "S1-T3",
+          "title": "Write docker-compose.yml",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 2,
+          "reference": "DOC-4.docker_compose",
+          "description": "Write the complete docker-compose.yml with all 9 services, 2 networks, 5 volumes, healthchecks, memory limits, and logging.",
+          "files_to_create": [
+            "docker-compose.yml"
+          ],
+          "key_requirements": [
+            "homeguard_net: internal: true \u2014 db, redis, beat use this only",
+            "homeguard_egress: standard bridge \u2014 api, worker, playwright, mailwatcher, n8n use both networks",
+            "Memory: playwright=1024M, db=768M, n8n=768M, api=512M, worker=512M, redis=256M, frontend=256M, mailwatcher=256M, beat=128M",
+            "All services: json-file logging max-size=50m max-file=5",
+            "api port: ${HOST_BIND_ADDRESS}:8000:8000, frontend: ${HOST_BIND_ADDRESS}:3000:80, n8n: ${HOST_BIND_ADDRESS}:5678:5678",
+            "playwright: security_opt: seccomp=unconfined, shm_size: 256mb"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose config --quiet && echo 'valid'",
+              "docker compose config | grep 'internal: true'"
+            ],
+            "expected": [
+              "valid",
+              "internal: true"
+            ]
+          }
+        },
+        {
+          "id": "S1-T4",
+          "title": "Write Dockerfiles for api, playwright, frontend",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 2,
+          "reference": "DOC-4.dockerfiles",
+          "description": "Write Dockerfiles and requirements/package files for all three custom-built services.",
+          "files_to_create": [
+            "api/Dockerfile",
+            "api/requirements.txt",
+            "playwright/Dockerfile",
+            "playwright/requirements.txt",
+            "frontend/Dockerfile",
+            "frontend/nginx.conf",
+            "frontend/package.json"
+          ],
+          "api_requirements": [
+            "fastapi",
+            "uvicorn[standard]",
+            "sqlalchemy[asyncio]",
+            "asyncpg",
+            "alembic",
+            "pyjwt",
+            "passlib[bcrypt]",
+            "python-dotenv",
+            "slowapi",
+            "celery[redis]",
+            "redis",
+            "jinja2",
+            "weasyprint",
+            "pydantic",
+            "httpx",
+            "jsonschema",
+            "testcontainers[postgres]",
+            "pytest",
+            "pytest-asyncio",
+            "pytest-cov",
+            "aiosmtpd"
+          ],
+          "playwright_requirements": [
+            "playwright",
+            "fastapi",
+            "uvicorn[standard]",
+            "pydantic",
+            "aiofiles",
+            "jsonschema"
+          ],
+          "nginx_conf_requirements": [
+            "proxy_pass http://api:8000 for /api/ location",
+            "Upgrade + Connection headers for /api/ws location",
+            "try_files $uri $uri/ /index.html for SPA routing",
+            "Security headers: X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy, CSP"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose build api 2>&1 | tail -1",
+              "docker compose build playwright 2>&1 | tail -1",
+              "docker compose build frontend 2>&1 | tail -1"
+            ],
+            "expected": [
+              "Successfully built",
+              "Successfully built",
+              "Successfully built"
+            ]
+          }
+        },
+        {
+          "id": "S1-T5",
+          "title": "Write postgres init.sql and start the full stack",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 1,
+          "reference": "DOC-4.postgres_init_sql",
+          "description": "Create init.sql to bootstrap extensions and schemas on first DB container creation, then bring full stack up.",
+          "files_to_create": [
+            "docker/postgres/init.sql"
+          ],
+          "init_sql_must_include": [
+            "CREATE EXTENSION IF NOT EXISTS 'uuid-ossp'",
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+            "CREATE SCHEMA IF NOT EXISTS for: identity, registry, scanning, requests, mail, audit, reporting, auth, archive",
+            "GRANT ALL ON SCHEMA each TO homeguard",
+            "ALTER ROLE homeguard SET search_path TO all schemas"
+          ],
+          "commands_to_run": [
+            "docker compose up -d db redis && sleep 10 && docker compose up -d"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose exec db pg_isready -U homeguard && echo 'db ready'",
+              "docker compose exec db psql -U homeguard homeguard -c \"\\dn\" | grep -c schema"
+            ],
+            "expected": [
+              "db ready",
+              ">= 9"
+            ]
+          }
+        },
+        {
+          "id": "S1-T6",
+          "title": "Implement all SQLAlchemy models and Alembic migrations",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 8,
+          "reference": "DOC-3",
+          "description": "Implement every table from DOC-3 as SQLAlchemy async models. Apply Alembic migration. Verify PII encryption.",
+          "files_to_create": [
+            "api/database.py",
+            "api/models/__init__.py",
+            "api/models/identity.py",
+            "api/models/registry.py",
+            "api/models/scanning.py",
+            "api/models/requests.py",
+            "api/models/mail.py",
+            "api/models/audit.py",
+            "api/models/reporting.py",
+            "api/models/auth.py",
+            "api/models/archive.py",
+            "migrations/env.py",
+            "migrations/alembic.ini"
+          ],
+          "implementation_notes": [
+            "database.py: async engine with pool_size=10 max_overflow=20. DATABASE_URL from os.environ.",
+            "PII columns in identity models: SQLAlchemy TypeDecorator \u2014 process_bind_param calls pgp_sym_encrypt(value, DB_ENCRYPTION_KEY), process_result_value calls pgp_sym_decrypt",
+            "audit.audit_log SQLAlchemy model: override delete() and update() to raise NotImplementedError",
+            "archive tables: mirror structure of source tables + archived_at TIMESTAMPTZ default now()",
+            "UNIQUE constraints from DOC-3.key_constraints must be declared on models",
+            "All 7 indexes from DOC-3.key_indexes created as Index() objects in migration"
+          ],
+          "commands_to_run": [
+            "docker compose run --rm api alembic revision --autogenerate -m 'initial_schema'",
+            "docker compose run --rm api alembic upgrade head"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose run --rm api alembic current 2>&1 | grep head",
+              "docker compose exec db psql -U homeguard homeguard -c \"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema IN ('identity','registry','scanning','requests','mail','audit','reporting','auth','archive')\" | grep -E '[0-9]+'",
+              "docker compose exec db psql -U homeguard homeguard -c \"SELECT pgp_sym_decrypt(pgp_sym_encrypt('hello', 'testkey')::bytea, 'testkey');\" | grep hello"
+            ],
+            "expected": [
+              "head",
+              ">= 30",
+              "hello"
+            ]
+          }
+        },
+        {
+          "id": "S1-T7",
+          "title": "Write broker playbooks and seed registry",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 3,
+          "reference": "DOC-6",
+          "description": "Create initial broker playbook JSON files for top data broker sites. Write and run the seed script.",
+          "files_to_create": [
+            "scripts/seed_brokers.py",
+            "playbooks/brokers/spokeo.com.json",
+            "playbooks/brokers/whitepages.com.json",
+            "playbooks/brokers/beenverified.com.json",
+            "playbooks/brokers/intelius.com.json",
+            "playbooks/brokers/peoplefinder.com.json",
+            "playbooks/brokers/radaris.com.json",
+            "playbooks/brokers/instantcheckmate.com.json",
+            "playbooks/brokers/truthfinder.com.json",
+            "playbooks/brokers/peoplefinders.com.json",
+            "playbooks/brokers/addresses.com.json"
+          ],
+          "playbook_schema_reference": "DOC-6.formal_json_schema \u2014 every playbook must validate against playbooks/schema.json",
+          "complexity_assignment": {
+            "simple": [
+              "whitepages.com",
+              "addresses.com"
+            ],
+            "multi_step": [
+              "spokeo.com",
+              "radaris.com",
+              "peoplefinders.com",
+              "intelius.com",
+              "instantcheckmate.com",
+              "truthfinder.com",
+              "peoplefinder.com"
+            ],
+            "complex": [
+              "beenverified.com"
+            ]
+          },
+          "seed_script_logic": [
+            "Load each .json from playbooks/brokers/",
+            "Validate against playbooks/schema.json \u2014 skip invalid files with error log",
+            "INSERT INTO registry.brokers ON CONFLICT (canonical_domain) DO UPDATE",
+            "INSERT INTO registry.broker_playbooks (version=1, is_active=True, playbook_json=full_content)",
+            "Print: N brokers seeded"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose run --rm api python scripts/seed_brokers.py 2>&1 | tail -3",
+              "docker compose exec db psql -U homeguard homeguard -c \"SELECT COUNT(*) FROM registry.brokers;\""
+            ],
+            "expected": [
+              "N brokers seeded",
+              ">= 10"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "sprint": 2,
+      "title": "Core API \u2014 Auth, Profiles, Brokers & n8n",
+      "goal": "All auth/profile/broker endpoints working. n8n discovery pipeline live with >= 50 brokers. HMAC webhook verified.",
+      "duration_days": 5,
+      "phase_refs": [
+        "Phase 3",
+        "Phase 4"
+      ],
+      "gate_checks": [
+        "pytest tests/unit/api/ -v \u2014 0 failures",
+        "POST /api/auth/login returns JWT token for valid credentials",
+        "11th login attempt in 1 minute returns 429",
+        "Signed webhook payload upserts brokers, unsigned returns 401",
+        "SELECT COUNT(*) FROM registry.brokers >= 50 after n8n live run"
+      ],
+      "tasks": [
+        {
+          "id": "S2-T1",
+          "title": "FastAPI app skeleton \u2014 middleware, error handlers, health endpoint",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 3,
+          "reference": "DOC-5.conventions",
+          "files_to_create": [
+            "api/main.py",
+            "api/dependencies.py",
+            "api/exceptions.py",
+            "api/schemas/__init__.py",
+            "api/schemas/common.py",
+            "api/routers/__init__.py",
+            "api/routers/system.py"
+          ],
+          "implementation_notes": [
+            "main.py: FastAPI(lifespan=lifespan). Add slowapi Limiter, add exception handler for RateLimitExceeded returning 429 with error_code=rate_limited",
+            "All errors return: {success: false, error_code: snake_case, message: str, detail: obj, request_id: uuid}",
+            "Request ID middleware: generates uuid4 per request, attaches to request.state.request_id",
+            "dependencies.py: get_db() async session, get_current_user() validates JWT + checks auth.sessions.revoked_at IS NULL",
+            "GET /api/system/health: unauthenticated. Returns per-service status + last_scan_completed_at + celery_queue_depth + disk_usage.",
+            "GET /api/system/stats: authenticated. Aggregate counts for dashboard overview cards.",
+            "GET /api/system/config: admin only. Non-sensitive env vars. Sensitive vars show {configured: true}."
+          ],
+          "verify": {
+            "commands": [
+              "docker compose restart api && sleep 5",
+              "curl -s http://localhost:8000/api/system/health | python3 -c \"import sys,json; print(json.load(sys.stdin)['data']['status'])\"",
+              "curl -s http://localhost:8000/api/profiles | python3 -c \"import sys,json; print(json.load(sys.stdin)['error_code'])\""
+            ],
+            "expected": [
+              "healthy",
+              "token_missing"
+            ]
+          }
+        },
+        {
+          "id": "S2-T2",
+          "title": "Auth router + test infrastructure",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 4,
+          "reference": "DOC-5.routers.auth, DOC-13.backend_test_infrastructure",
+          "files_to_create": [
+            "api/routers/auth.py",
+            "api/services/auth_service.py",
+            "tests/conftest.py",
+            "tests/unit/api/test_auth.py",
+            "pytest.ini"
+          ],
+          "implementation_notes": [
+            "POST /api/auth/login: bcrypt.checkpw, issue JWT {sub, role, jti=uuid4, exp}, INSERT auth.sessions, write audit_log=user_login. Rate limit: 10/minute per IP.",
+            "POST /api/auth/logout: UPDATE auth.sessions SET revoked_at=now(), write audit_log=user_logout",
+            "GET /api/auth/me: return user from JWT dependency",
+            "conftest.py: pg_container (session scope testcontainers PostgreSQL 15), db_session (function scope SAVEPOINT rollback), test_client (AsyncClient with DB override), admin_token, member_token, test_profile, test_broker fixtures",
+            "pytest.ini: asyncio_mode=auto, testpaths=tests, addopts=--cov=api --cov=workers --cov=mailwatcher --cov=playwright --cov-fail-under=80",
+            "test_auth.py: all 7 tests from DOC-13 including rate limit and revocation tests"
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/unit/api/test_auth.py -v 2>&1 | tail -5"
+            ],
+            "expected": [
+              "7 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S2-T3",
+          "title": "Profiles router \u2014 CRUD, field versioning, archive deletion",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 5,
+          "reference": "DOC-5.routers.profiles",
+          "files_to_create": [
+            "api/routers/profiles.py",
+            "api/services/profile_service.py",
+            "api/schemas/profiles.py",
+            "tests/unit/api/test_profiles.py"
+          ],
+          "implementation_notes": [
+            "All 8 endpoints from DOC-5.routers.profiles",
+            "POST /api/profiles: max 5 profiles enforced, all PII encrypted via model TypeDecorator, audit_log=profile_created",
+            "POST /api/profiles/{id}/fields: stamp effective_to=now() + is_current=False on existing same type+subtype before inserting new row",
+            "DELETE /api/profiles/{id}: execute 8-step archive transaction from DOC-3.schemas.archive.deletion_sequence in single db.begin() block. Two audit_log entries.",
+            "PATCH is_paused=True: suspends automation. is_paused=False: schedules catch-up scan within 24h via Celery ETA.",
+            "Member role: returns 403 if accessing another profile"
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/unit/api/test_profiles.py -v 2>&1 | tail -5"
+            ],
+            "expected": [
+              ">= 8 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S2-T4",
+          "title": "Brokers router and HMAC-authenticated n8n webhook",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 4,
+          "reference": "DOC-5.routers.brokers, DOC-5.routers.webhooks",
+          "files_to_create": [
+            "api/routers/brokers.py",
+            "api/routers/webhooks.py",
+            "api/services/broker_service.py",
+            "api/schemas/brokers.py",
+            "tests/integration/test_webhook_upsert.py"
+          ],
+          "implementation_notes": [
+            "POST /api/webhooks/n8n: extract X-Homeguard-Signature header. Compute sha256=hex(hmac.new(N8N_WEBHOOK_SECRET.encode(), request_body, sha256).hexdigest()). Use hmac.compare_digest() for constant-time compare. Reject 401 if missing/invalid.",
+            "Upsert: INSERT INTO registry.brokers ON CONFLICT (canonical_domain) DO UPDATE SET ... WHERE excluded.field IS DISTINCT FROM brokers.field",
+            "If payload contains playbook_json: validate against schema.json, insert broker_playbooks version+1 is_active=True, set prior is_active=False",
+            "Return {success:true, upserted:N, skipped:N, errors:N}",
+            "POST /api/brokers/{id}/playbooks/{pid}/activate: atomic swap in single transaction"
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/integration/test_webhook_upsert.py -v 2>&1 | tail -8",
+              "curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/webhooks/n8n -H 'Content-Type: application/json' -d '{\"source\":\"t\",\"brokers\":[]}'"
+            ],
+            "expected": [
+              "4 passed",
+              "401"
+            ]
+          }
+        },
+        {
+          "id": "S2-T5",
+          "title": "Import n8n workflows and run live broker discovery",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 3,
+          "reference": "DOC-10",
+          "files_to_create": [
+            "workflows/broker_discovery_orchestrator.json",
+            "workflows/source_github_big_ass_list.json",
+            "workflows/source_eff_ssd.json",
+            "workflows/source_custom_url.json",
+            "workflows/discovery_notify.json"
+          ],
+          "steps": [
+            "Build all 5 workflow JSON files per DOC-10.workflow_definitions node specs",
+            "Open n8n UI at http://localhost:5678 \u2014 login with N8N_BASIC_AUTH_USER/PASSWORD",
+            "Import all 5 workflow files via Workflows \u2192 Import from File",
+            "Activate WF-001 through WF-003 and WF-005 (leave WF-004 inactive)",
+            "Manually trigger WF-001 with dry_run=true in Set Run Context node to test connectivity",
+            "If dry run succeeds: manually trigger WF-001 in live mode"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose exec db psql -U homeguard homeguard -c \"SELECT COUNT(*) FROM registry.brokers;\"",
+              "docker compose exec db psql -U homeguard homeguard -c \"SELECT DISTINCT discovered_via FROM registry.brokers;\""
+            ],
+            "expected": [
+              ">= 50",
+              "github_big_ass_list"
+            ]
+          }
+        },
+        {
+          "id": "S2-T6",
+          "title": "Write init.sh first-run setup script",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 1,
+          "reference": "DOC-4.init_sh_steps",
+          "files_to_create": [
+            "init.sh"
+          ],
+          "implementation_notes": [
+            "set -euo pipefail at top",
+            "10 steps from DOC-4: prereq check, .env validation (no CHANGE_ME), start db+redis, wait for pg_isready, alembic upgrade head, seed_brokers.py, create admin user, docker compose up -d, health check, print URLs",
+            "Print LAN IP-based URLs for dashboard, API docs, n8n at end",
+            "chmod +x in repo (git update-index --chmod=+x init.sh)"
+          ],
+          "verify": {
+            "commands": [
+              "bash -n init.sh && echo 'syntax ok'"
+            ],
+            "expected": [
+              "syntax ok"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "sprint": 3,
+      "title": "Playwright Executor Service",
+      "goal": "Playwright microservice accepts scan/optout jobs, executes all 16 action types, returns structured JobResult with screenshots. All playwright unit tests pass.",
+      "duration_days": 5,
+      "phase_refs": [
+        "Phase 5"
+      ],
+      "gate_checks": [
+        "docker compose exec api curl -s http://playwright:8001/health returns {status: healthy, pool_available: 3}",
+        "POST /jobs/scan returns job_id immediately (202)",
+        "GET /jobs/{id} eventually returns completed result",
+        "dry_run=true skips submit action, all other steps execute",
+        "Error auto-captures screenshot at correct structured path",
+        "pytest tests/unit/playwright/ \u2014 0 failures"
+      ],
+      "tasks": [
+        {
+          "id": "S3-T1",
+          "title": "Browser pool, anti-detection, and startup sequence",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 4,
+          "reference": "DOC-8.browser_pool, DOC-8.service_startup",
+          "files_to_create": [
+            "playwright/main.py",
+            "playwright/pool.py",
+            "playwright/models.py",
+            "playwright/user_agents.json"
+          ],
+          "implementation_notes": [
+            "pool.py: BrowserPool. Launch chromium with args from DOC-8.service_startup.chromium_launch_args including --disable-blink-features=AutomationControlled",
+            "Per-context: randomised UA from user_agents.json (weighted: Chrome 65%, Safari 20%, Firefox 15%), viewport random 1280-1920 x 720-1080",
+            "add_init_script on each page: sets navigator.webdriver=undefined, mocks navigator.plugins.length > 0, mocks chrome.runtime",
+            "acquire() \u2192 returns available context or None. release(ctx) \u2192 returns to pool. Pool size from PLAYWRIGHT_POOL_SIZE env (default 3).",
+            "user_agents.json: chrome_windows (20), chrome_mac (10), chrome_linux (8), safari_mac (10), safari_ios (8), firefox_windows (8), firefox_mac (6)",
+            "models.py: all Pydantic models from DOC-8.pydantic_models \u2014 ScanJobRequest, OptoutJobRequest, StepResult, ErrorResult, JobResult, ScreenshotRecord",
+            "GET /health: {status, pool_size, pool_available, pool_busy, chromium_version}"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose restart playwright && sleep 15",
+              "docker compose exec api curl -s http://playwright:8001/health | python3 -c \"import sys,json; d=json.load(sys.stdin); print(d['status'], 'pool:', d['pool_available'])\""
+            ],
+            "expected": [
+              "healthy pool: 3"
+            ]
+          }
+        },
+        {
+          "id": "S3-T2",
+          "title": "Token resolver (SafeDict) and all 16 action handlers",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 6,
+          "reference": "DOC-8.executor_engine.token_resolution, DOC-8.executor_engine.action_handlers",
+          "files_to_create": [
+            "playwright/token_resolver.py",
+            "playwright/actions.py",
+            "playwright/screenshot.py",
+            "tests/unit/playwright/test_token_resolver.py",
+            "tests/unit/playwright/test_screenshot_path.py"
+          ],
+          "implementation_notes": [
+            "token_resolver.py: class SafeDict(dict): def __missing__(self, key): log.warning(f'Token {key} not found'); return ''. resolve(template, tokens) -> template.format_map(SafeDict(derived_tokens(tokens)))",
+            "derived_tokens: add first_name/last_name from full_name, city/state/zip from address_full, dob_month/dob_year from date_of_birth",
+            "actions.py: each action is async def handle_{action}(page, step, profile_tokens, dry_run) -> StepResult",
+            "submit: if dry_run: return StepResult(status='skipped', dry_run_skipped=True). Else: await click + wait networkidle.",
+            "fill_form: iterate values dict, fill each selector with 200ms sleep between fields",
+            "conditional: count = await page.locator(selector).count(); if > 0: execute step.steps recursively",
+            "screenshot.py: path = f'/app/screenshots/{profile_id}/{broker_id}/{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}_{step_id}_{type}.png'. os.makedirs(dir, exist_ok=True)."
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/unit/playwright/test_token_resolver.py tests/unit/playwright/test_screenshot_path.py -v 2>&1 | tail -8"
+            ],
+            "expected": [
+              ">= 8 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S3-T3",
+          "title": "PlaybookExecutor \u2014 phase loop, confirmation, CAPTCHA, error classification",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 6,
+          "reference": "DOC-8.executor_engine.phase_execution, DOC-8.confirmation_detection, DOC-8.captcha_detection, DOC-8.error_classification",
+          "files_to_create": [
+            "playwright/executor.py",
+            "playwright/confirmation.py",
+            "playwright/error_classifier.py",
+            "tests/unit/playwright/test_confirmation.py",
+            "tests/unit/playwright/test_error_classifier.py",
+            "tests/unit/playwright/test_playbook_validator.py"
+          ],
+          "implementation_notes": [
+            "executor.py: PlaybookExecutor.run(job, context) -> JobResult. Validate playbook JSON Schema first.",
+            "Phase loop: for phase in playbook.phases \u2192 navigate url_template \u2192 for step in phase.steps \u2192 dispatch to actions.py \u2192 check confirmation + captcha after each navigate/submit",
+            "on_failure handlers: stop \u2192 set outcome=error return. skip_phase \u2192 log continue. mark_manual \u2192 set outcome=requires_manual return.",
+            "Always capture auto-screenshot on any exception regardless of step.screenshot flag",
+            "error_classifier.py: map playwright exceptions to error_type from DOC-8.error_classification. Each returns ErrorResult with recovery_hint.",
+            "confirmation.py: async check_text(page, patterns) and check_url(page, url_patterns) and check_negative(page, patterns). Combined per match_strategy."
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/unit/playwright/ -v 2>&1 | tail -5"
+            ],
+            "expected": [
+              ">= 20 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S3-T4",
+          "title": "Async job API \u2014 submit, poll, cancel, list endpoints",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 4,
+          "reference": "DOC-8.service_api, DOC-8.job_lifecycle",
+          "files_to_create": [
+            "playwright/job_manager.py",
+            "playwright/routers/__init__.py",
+            "playwright/routers/jobs.py"
+          ],
+          "implementation_notes": [
+            "job_manager.py: JobManager with jobs: dict[str, JobState]. Background asyncio task evicts jobs older than 1 hour.",
+            "POST /jobs/scan and POST /jobs/optout: try acquire() \u2014 if None return 503 with retry_after_ms=10000. Start asyncio.create_task(executor.run(job, context)). Return {job_id, status: queued, estimated_duration_ms}.",
+            "estimated_duration_ms: simple=15000, multi_step=45000, complex=120000",
+            "GET /jobs/{id}: return JobResult or current progress. 404 if evicted.",
+            "DELETE /jobs/{id}: task.cancel(), release(context), status=cancelled."
+          ],
+          "verify": {
+            "commands": [
+              "docker compose exec api python3 -c \"\nimport httpx, json\npayload = {'job_id': 'test-s3', 'profile_id': 'aaa', 'broker_id': 'bbb', 'broker_domain': 'test.local', 'playbook': json.load(open('playbooks/brokers/whitepages.com.json')), 'profile_tokens': {'full_name': 'Test User', 'removal_email': 'test@test.com'}, 'scan_run_id': 'ccc'}\nr = httpx.post('http://playwright:8001/jobs/scan', json=payload, timeout=5)\nprint('status:', r.status_code, 'job_id:', r.json().get('job_id', 'MISSING'))\n\""
+            ],
+            "expected": [
+              "status: 202 job_id: test-s3"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "sprint": 4,
+      "title": "Celery Workers & Mailwatcher",
+      "goal": "Full scan\u2192exposure\u2192removal\u2192verification pipeline end-to-end. Mailwatcher classifying emails. All critical paths CP-02 through CP-05 and CP-09 passing.",
+      "duration_days": 5,
+      "phase_refs": [
+        "Phase 6",
+        "Phase 7"
+      ],
+      "gate_checks": [
+        "pytest tests/integration/test_scan_to_removal.py -m critical \u2014 all pass",
+        "pytest tests/unit/mailwatcher/ \u2014 0 failures",
+        "CP-02 test_full_scan_to_web_form_removal passes",
+        "CP-03 test_email_confirmed_removal_triggers_verification_schedule passes",
+        "CP-04 test_verification_scan_detects_relisting passes",
+        "CP-05 test_followup_escalates_after_3_attempts passes",
+        "CP-09 all 3 classifier tests pass",
+        "docker compose logs mailwatcher shows poll_completed every 15 minutes"
+      ],
+      "tasks": [
+        {
+          "id": "S4-T1",
+          "title": "Celery app config, Beat schedule, and task infrastructure",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 2,
+          "reference": "DOC-7.worker_config, DOC-7.beat_schedule",
+          "files_to_create": [
+            "api/workers/__init__.py",
+            "api/workers/celery_app.py",
+            "api/workers/tasks/__init__.py"
+          ],
+          "implementation_notes": [
+            "celery_app.py: Celery('homeguard', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND). Config from DOC-7.worker_config.",
+            "Beat schedule: 4 entries \u2014 daily_full_scan (0 2 * * *), nightly_screenshot_purge (0 3 * * *), weekly_broker_health_check (0 4 * * 0), hourly_followup_check (0 * * * *)",
+            "Base task class: writes to audit.system_events on success/failure with task_name, task_id, status, duration_ms",
+            "All tasks must be idempotent \u2014 check for existing records before creating duplicates"
+          ],
+          "verify": {
+            "commands": [
+              "docker compose restart worker beat && sleep 5",
+              "docker compose exec worker celery -A workers.celery_app inspect ping 2>&1 | grep -i pong"
+            ],
+            "expected": [
+              "pong"
+            ]
+          }
+        },
+        {
+          "id": "S4-T2",
+          "title": "Scan tasks \u2014 dispatch chain, scan_broker, analytics chord callback",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 6,
+          "reference": "DOC-7.task_groups.scanning",
+          "files_to_create": [
+            "api/workers/tasks/scanning.py",
+            "tests/unit/workers/test_scan_tasks.py",
+            "tests/integration/test_scan_to_removal.py"
+          ],
+          "task_order": [
+            "1. scan_broker(profile_id, broker_id, scan_run_id): fetch playbook + decrypt fields \u2192 POST playwright /jobs/scan \u2192 poll every 5s \u2192 on found: create exposure row + dispatch execute_removal_request.delay() \u2192 publish Redis SSE event \u2192 update scan_run counters",
+            "2. compute_post_scan_analytics(results, profile_id, scan_run_id): chord callback \u2014 compute score formula \u2014 insert exposure_scores + daily_broker_snapshots rows \u2014 create new_exposure notifications",
+            "3. dispatch_profile_scan(profile_id, scan_run_id): chord(group([scan_broker.s(p,b,r) for b in brokers_batches_10]) | compute_post_scan_analytics.s(p,r))",
+            "4. dispatch_daily_scan(): create scan_run row \u2014 group([dispatch_profile_scan.s(p,r) for active non-paused profiles])",
+            "5. dispatch_verification_scan(profile_id, broker_id, request_id, vscan_id): targeted scan \u2014 on still_listed: create relisting_events + new removal_request(parent_request_id=original)"
+          ],
+          "conftest_fake_playwright": "Add fake_playwright_service fixture to conftest.py: FastAPI server on random port, set_next_outcome(outcome, fields=[]) configures next GET /jobs/{id} response. Override PLAYWRIGHT_SERVICE_URL.",
+          "verify": {
+            "commands": [
+              "pytest tests/unit/workers/test_scan_tasks.py -v 2>&1 | tail -8",
+              "pytest tests/integration/test_scan_to_removal.py -m critical -v 2>&1 | tail -10"
+            ],
+            "expected": [
+              "6 passed",
+              "CP-02 CP-03 CP-04 passed"
+            ]
+          }
+        },
+        {
+          "id": "S4-T3",
+          "title": "Removal request tasks \u2014 web form, email, legal letter, follow-up",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 6,
+          "reference": "DOC-7.task_groups.requests",
+          "files_to_create": [
+            "api/workers/tasks/requests.py",
+            "api/templates/email/generic_removal.html",
+            "api/templates/email/generic_removal.txt",
+            "api/templates/legal/ccpa_letter.html",
+            "api/templates/legal/gdpr_letter.html",
+            "tests/integration/test_email_response_flow.py"
+          ],
+          "implementations": {
+            "execute_removal_request": "Route by removal_method. Write audit_log BEFORE dispatch. Schedule followup ETA = now() + broker.estimated_response_days * 86400.",
+            "submit_web_form_optout": "Call playwright /jobs/optout. Poll. On confirmed: status=pending_confirmation. On captcha: status=requires_manual + flag broker.",
+            "send_removal_email": "Render Jinja2 (broker template first, generic fallback). SMTP send. Store Message-ID. audit_log=removal_email_sent BEFORE smtp.sendmail().",
+            "generate_and_send_legal_letter": "Render HTML template. WeasyPrint PDF. Save to /app/screenshots/legal/{request_id}.pdf. audit_log=legal_letter_generated BEFORE send. Email with PDF attachment.",
+            "followup_removal_request": "Skip if status in (confirmed_removed, verified_removed, requires_manual, failed). INSERT followups row. Re-dispatch method task. If followup_number==3 and no response: status=requires_manual + notification.",
+            "process_email_classification": "confirmed_removal \u2192 schedule verification ETA 14 days. rejection \u2192 failed. info_requested \u2192 requires_manual. verification_link \u2192 dispatch click_verification_link. unclassified \u2192 action_required notification."
+          },
+          "verify": {
+            "commands": [
+              "pytest tests/integration/test_email_response_flow.py -v 2>&1 | tail -8",
+              "pytest tests/integration/ -m critical -v 2>&1 | tail -5"
+            ],
+            "expected": [
+              "3 passed",
+              "all critical passed"
+            ]
+          }
+        },
+        {
+          "id": "S4-T4",
+          "title": "Mailwatcher \u2014 IMAP poll, email parser, two-stage classifier, patterns",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 6,
+          "reference": "DOC-9",
+          "files_to_create": [
+            "mailwatcher/main.py",
+            "mailwatcher/imap_client.py",
+            "mailwatcher/email_parser.py",
+            "mailwatcher/classifier.py",
+            "mailwatcher/request_matcher.py",
+            "mailwatcher/link_extractor.py",
+            "mailwatcher/dispatcher.py",
+            "mailwatcher/models.py",
+            "mailwatcher/patterns.yml",
+            "tests/unit/mailwatcher/test_email_parser.py",
+            "tests/unit/mailwatcher/test_classifier.py",
+            "tests/unit/mailwatcher/test_request_matcher.py",
+            "tests/unit/mailwatcher/test_link_extractor.py",
+            "tests/unit/mailwatcher/test_patterns.py"
+          ],
+          "key_implementation_notes": [
+            "imap_client.py: IMAPClient with IMAP4_SSL. poll() fetches UNSEEN. Cap at 50 per cycle. COPY to Processed then STORE \\Deleted + EXPUNGE.",
+            "classifier.py: Stage 1 \u2014 prefilter_keywords = union of all keywords across all types. Stage 2 \u2014 regex per type in priority: verification_link first, then confirmed_removal, info_requested, rejection.",
+            "patterns.yml hot-reload: stat() each poll, if mtime changed re-read + recompile all regex patterns.",
+            "deduplication: SELECT id FROM mail.inbound_messages WHERE message_id_header = %s. Skip if found.",
+            "link_extractor.py: score each URL \u2014 positive for /verify /confirm /optout in path, domain matches from_domain. Negative for tracking pixels, mailchimp domains. Highest score wins.",
+            "On verification_link: dispatch click_verification_link.delay(request_id, url, broker_id, profile_id) via celery.send_task()"
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/unit/mailwatcher/ -v 2>&1 | tail -8",
+              "sleep 20 && docker compose logs mailwatcher --tail=5 | grep poll_completed"
+            ],
+            "expected": [
+              ">= 15 passed",
+              "poll_completed"
+            ]
+          }
+        },
+        {
+          "id": "S4-T5",
+          "title": "Maintenance, registry, and notification tasks",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 2,
+          "reference": "DOC-7.task_groups.maintenance, DOC-7.task_groups.registry, DOC-7.task_groups.notifications",
+          "files_to_create": [
+            "api/workers/tasks/maintenance.py",
+            "api/workers/tasks/registry.py",
+            "api/workers/tasks/notifications.py",
+            "tests/unit/workers/test_maintenance_tasks.py"
+          ],
+          "implementations": {
+            "purge_expired_screenshots": "SELECT WHERE purge_at <= now() AND purged_at IS NULL. os.remove() each. UPDATE purged_at. Write system_events.",
+            "compute_disk_usage": "shutil.disk_usage() per volume. SET Redis homeguard:disk_usage TTL=4200.",
+            "check_broker_opt_out_urls": "HTTP HEAD each active web_form broker. Flag unreachable: PATCH broker notes + create notification.",
+            "upsert_broker_from_discovery": "Validate schema. Upsert brokers. Insert playbook if present.",
+            "create_notification": "INSERT auth.notifications. redis.publish(homeguard:notifications:{household_id}, json.dumps(notification))."
+          },
+          "verify": {
+            "commands": [
+              "pytest tests/unit/workers/ -v 2>&1 | tail -5"
+            ],
+            "expected": [
+              ">= 15 passed, 0 failed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "sprint": 5,
+      "title": "Remaining API Routers & React Frontend Foundation",
+      "goal": "All 38 endpoints implemented. React app running with auth, stores, WebSocket, SSE, and core components. Coverage gates met.",
+      "duration_days": 5,
+      "phase_refs": [
+        "Phase 8",
+        "Phase 9 tasks 9.1-9.3"
+      ],
+      "gate_checks": [
+        "All 38 API endpoints return correct shapes per DOC-5",
+        "pytest tests/ \u2014 backend coverage >= 80%",
+        "npx vitest run \u2014 store and hook tests pass",
+        "CP-07 PII encryption round-trip test passes",
+        "CP-08 audit log append-only test passes",
+        "CP-10 JWT never in localStorage test passes",
+        "StatusBadge and ScoreGauge component tests pass",
+        "Dashboard loads at http://localhost:3000 without console errors"
+      ],
+      "tasks": [
+        {
+          "id": "S5-T1",
+          "title": "Scans router with SSE progress stream",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 4,
+          "reference": "DOC-5.routers.scans",
+          "files_to_create": [
+            "api/routers/scans.py",
+            "api/services/scan_service.py",
+            "api/schemas/scans.py"
+          ],
+          "implementation_notes": [
+            "POST /api/scans: create scan_run row, dispatch task, return 202 with scan_run_id immediately",
+            "GET /api/scans/{id}/progress: SSE via StreamingResponse(event_generator(), media_type='text/event-stream'). Validate JWT from ?token= query param (EventSource cannot set headers). Subscribe to Redis homeguard:scan:{scan_run_id} channel. Yield events. Send scan_complete when run completes.",
+            "SSE event format: data: {event: scan_progress, scan_run_id, completed, total, latest_result: {broker_name, status}}\\n\\n",
+            "Cursor pagination on GET /api/scans and GET /api/scans/{id}/results"
+          ],
+          "verify": {
+            "commands": [
+              "TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"'$ADMIN_PASSWORD'\"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"data\"][\"token\"])')",
+              "curl -s -X POST http://localhost:8000/api/scans -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"run_type\":\"manual\"}' | python3 -c \"import sys,json; print('ok:', 'scan_run_id' in json.load(sys.stdin).get('data',{}))\""
+            ],
+            "expected": [
+              "ok: True"
+            ]
+          }
+        },
+        {
+          "id": "S5-T2",
+          "title": "Requests, reports, notifications, and WebSocket routers",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 5,
+          "reference": "DOC-5.routers.requests, reports, notifications",
+          "files_to_create": [
+            "api/routers/requests.py",
+            "api/routers/reports.py",
+            "api/routers/notifications.py",
+            "api/services/report_service.py",
+            "api/workers/tasks/reports.py",
+            "tests/integration/test_pagination.py"
+          ],
+          "key_notes": [
+            "GET /api/reports/audit-log: admin only, read-only, cursor pagination",
+            "GET /api/reports/export: if estimated rows > 10000 \u2192 dispatch generate_export_report task \u2192 return {download_token}. Else stream directly.",
+            "WebSocket /api/ws/notifications: validate ?token= JWT, subscribe to Redis homeguard:notifications:{household_id}, fan out to connected clients, send ping every 30s, expect pong within 35s or close.",
+            "POST /api/notifications/{id}/read: is_read=True, publish WebSocket decrement event"
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/integration/test_pagination.py -v 2>&1 | tail -5",
+              "TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"'$ADMIN_PASSWORD'\"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"data\"][\"token\"])')",
+              "curl -s \"http://localhost:8000/api/reports/audit-log\" -H \"Authorization: Bearer $TOKEN\" | python3 -c \"import sys,json; d=json.load(sys.stdin); print('ok:', 'pagination' in d)\""
+            ],
+            "expected": [
+              "passed",
+              "ok: True"
+            ]
+          }
+        },
+        {
+          "id": "S5-T3",
+          "title": "React app \u2014 Vite, Tailwind, Zustand stores, axios client, routing",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 4,
+          "reference": "DOC-11.zustand_stores, DOC-11.axios_client, DOC-11.routing, DOC-11.package_json_dependencies",
+          "files_to_create": [
+            "frontend/package.json",
+            "frontend/vite.config.js",
+            "frontend/tailwind.config.js",
+            "frontend/postcss.config.js",
+            "frontend/src/main.jsx",
+            "frontend/src/App.jsx",
+            "frontend/src/api/client.js",
+            "frontend/src/stores/authStore.js",
+            "frontend/src/stores/themeStore.js",
+            "frontend/src/stores/notificationStore.js",
+            "frontend/src/stores/scanProgressStore.js",
+            "frontend/src/__tests__/setup.js"
+          ],
+          "critical_notes": [
+            "authStore: NEVER call localStorage.setItem or sessionStorage.setItem with token value \u2014 this is CP-10",
+            "themeStore: localStorage IS allowed \u2014 key homeguard_theme for theme persistence only",
+            "axios client.js: request interceptor reads authStore.getState().token. Response interceptor on 401: authStore.getState().logout() + navigate('/login'). On 429: show toast.",
+            "App.jsx: RequireAuth checks authStore.isAuthenticated. Redirect to /onboarding if admin + profiles.length === 0.",
+            "setup.js: @testing-library/jest-dom import, MSW server setup, mock global WebSocket and EventSource"
+          ],
+          "verify": {
+            "commands": [
+              "cd frontend && npm install && npm run build 2>&1 | tail -2",
+              "curl -s -o /dev/null -w '%{http_code}' http://localhost:3000"
+            ],
+            "expected": [
+              "built in",
+              "200"
+            ]
+          }
+        },
+        {
+          "id": "S5-T4",
+          "title": "WebSocket hook, SSE hook, and store + hook tests",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 3,
+          "reference": "DOC-11.websocket_hook, DOC-11.sse_hook",
+          "files_to_create": [
+            "frontend/src/hooks/useWebSocket.js",
+            "frontend/src/hooks/useScanSSE.js",
+            "frontend/src/hooks/useAuth.js",
+            "frontend/src/__tests__/hooks/useWebSocket.test.js",
+            "frontend/src/__tests__/hooks/useScanSSE.test.js",
+            "frontend/src/__tests__/stores/authStore.test.js",
+            "frontend/src/__tests__/stores/themeStore.test.js",
+            "frontend/src/__tests__/stores/notificationStore.test.js",
+            "frontend/src/__tests__/stores/scanProgressStore.test.js"
+          ],
+          "cp10_test": "authStore.test.js must spy on localStorage.setItem and assert it was NEVER called with a token value \u2014 this IS CP-10",
+          "verify": {
+            "commands": [
+              "cd frontend && npx vitest run src/__tests__/stores/ src/__tests__/hooks/ 2>&1 | tail -8"
+            ],
+            "expected": [
+              ">= 20 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S5-T5",
+          "title": "Common components \u2014 StatusBadge, ScoreGauge, DataTable, AppLayout",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 5,
+          "reference": "DOC-11.colour_system, DOC-11.score_gauge_component",
+          "files_to_create": [
+            "frontend/src/components/common/StatusBadge.jsx",
+            "frontend/src/components/common/ScoreGauge.jsx",
+            "frontend/src/components/common/ScoreTrendChart.jsx",
+            "frontend/src/components/common/DataTable.jsx",
+            "frontend/src/components/common/EmptyState.jsx",
+            "frontend/src/components/common/LoadingSkeleton.jsx",
+            "frontend/src/components/common/ErrorBanner.jsx",
+            "frontend/src/components/common/ConfirmDialog.jsx",
+            "frontend/src/components/layout/AppLayout.jsx",
+            "frontend/src/components/layout/Sidebar.jsx",
+            "frontend/src/components/layout/TopBar.jsx",
+            "frontend/src/components/layout/NotificationBell.jsx",
+            "frontend/src/__tests__/components/StatusBadge.test.jsx",
+            "frontend/src/__tests__/components/ScoreGauge.test.jsx",
+            "frontend/src/__tests__/mocks/handlers.js",
+            "frontend/src/__tests__/mocks/server.js"
+          ],
+          "score_gauge_impl": "SVG: r=36 \u2192 circumference=226.2. stroke-dashoffset=(1-score/100)*226.2. CSS: transition: stroke-dashoffset 1s ease-out. Colour class from DOC-11.colour_system.score_gauge_colours.",
+          "status_badge_impl": "All 8 request statuses \u2192 exact bg-*/text-* Tailwind classes from DOC-11.colour_system.status_colours including dark: variants",
+          "verify": {
+            "commands": [
+              "cd frontend && npx vitest run src/__tests__/components/ 2>&1 | tail -8"
+            ],
+            "expected": [
+              ">= 12 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S5-T6",
+          "title": "Backend coverage sweep and CP-07, CP-08 tests",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 2,
+          "reference": "DOC-13.quality_gates.critical_paths",
+          "files_to_create": [
+            "tests/unit/api/test_reports.py",
+            "tests/unit/api/test_notifications.py"
+          ],
+          "cp07_test": "test_profile_pii_encrypted_at_rest: INSERT profile, direct psql SELECT full_legal_name, assert value is binary not plain text",
+          "cp08_test": "test_audit_log_cannot_be_updated: attempt session.execute(UPDATE audit.audit_log ...), assert NotImplementedError raised. test_audit_log_cannot_be_deleted: same for DELETE.",
+          "verify": {
+            "commands": [
+              "pytest tests/ --cov=api --cov=workers --cov=mailwatcher --cov=playwright --cov-report=term-missing 2>&1 | tail -3"
+            ],
+            "expected": [
+              "TOTAL >= 80%"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "sprint": 6,
+      "title": "Frontend Pages, E2E Setup & Complete Test Suite",
+      "goal": "All dashboard pages complete. Full test suite passing. All 13 critical paths green.",
+      "duration_days": 5,
+      "phase_refs": [
+        "Phase 9 tasks 9.4-9.6",
+        "Phase 10"
+      ],
+      "gate_checks": [
+        "All 13 critical paths CP-01 through CP-13 pass",
+        "pytest tests/ coverage >= 80%",
+        "cd frontend && npx vitest run coverage >= 75%",
+        "All pages load without console errors",
+        "Onboarding wizard 5-step flow completes without error",
+        "Scan progress bar animates during active scan",
+        "cd e2e && npx playwright test \u2014 passes on Chromium"
+      ],
+      "tasks": [
+        {
+          "id": "S6-T1",
+          "title": "Dashboard, Profile Detail, Broker Registry pages and scan components",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 5,
+          "reference": "DOC-11.pages.DashboardPage, ProfileDetailPage, BrokerRegistryPage",
+          "files_to_create": [
+            "frontend/src/pages/DashboardPage.jsx",
+            "frontend/src/pages/ProfileDetailPage.jsx",
+            "frontend/src/pages/BrokerRegistryPage.jsx",
+            "frontend/src/components/scan/ScanProgressBar.jsx",
+            "frontend/src/components/scan/ScanTriggerButton.jsx",
+            "frontend/src/components/profile/ProfileCard.jsx",
+            "frontend/src/components/profile/ProfileFieldList.jsx",
+            "frontend/src/components/profile/AddFieldForm.jsx",
+            "frontend/src/components/broker/BrokerRow.jsx",
+            "frontend/src/components/broker/PlaybookVersionList.jsx",
+            "frontend/src/api/profiles.js",
+            "frontend/src/api/brokers.js",
+            "frontend/src/api/scans.js",
+            "frontend/src/api/system.js",
+            "frontend/src/__tests__/pages/DashboardPage.test.jsx"
+          ],
+          "implementation_notes": [
+            "DashboardPage: useQuery(['system','stats'], {refetchInterval:30000}) for stats cards. useQuery(['profiles']) for ScoreGauge grid. ScanProgressBar visible only when scanProgressStore.activeScanRunId != null.",
+            "ScanTriggerButton: admin role only (check authStore.user.role). Floating action button. On click: POST /api/scans, store scan_run_id in scanProgressStore, TanStack Query invalidate.",
+            "ProfileDetailPage: 4 tabs stored in URL ?tab= param. Each tab uses useQuery for its data.",
+            "useScanSSE hook activated on DashboardPage when activeScanRunId is set."
+          ],
+          "verify": {
+            "commands": [
+              "cd frontend && npx vitest run src/__tests__/pages/DashboardPage.test.jsx 2>&1 | tail -5"
+            ],
+            "expected": [
+              "passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S6-T2",
+          "title": "Request Tracker, Reports, System Health, Settings, Notifications pages",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 5,
+          "reference": "DOC-11.pages.RequestTrackerPage, ReportsPage, SystemHealthPage",
+          "files_to_create": [
+            "frontend/src/pages/RequestTrackerPage.jsx",
+            "frontend/src/pages/ReportsPage.jsx",
+            "frontend/src/pages/AuditLogPage.jsx",
+            "frontend/src/pages/SystemHealthPage.jsx",
+            "frontend/src/pages/SettingsPage.jsx",
+            "frontend/src/pages/NotificationsPage.jsx",
+            "frontend/src/components/request/RequestStatusTimeline.jsx",
+            "frontend/src/components/request/RequestRow.jsx",
+            "frontend/src/components/request/ResubmitButton.jsx",
+            "frontend/src/components/reports/ExposureScoreChart.jsx",
+            "frontend/src/components/reports/FieldExposureBreakdown.jsx",
+            "frontend/src/components/reports/RelistingTable.jsx",
+            "frontend/src/components/reports/AuditLogTable.jsx",
+            "frontend/src/api/requests.js",
+            "frontend/src/api/reports.js",
+            "frontend/src/api/notifications.js",
+            "frontend/src/__tests__/pages/RequestTrackerPage.test.jsx"
+          ],
+          "key_notes": [
+            "RequestTrackerPage: status tabs update URL ?status= param. useInfiniteQuery for cursor pagination. Load More button appends next page.",
+            "ReportsPage: ExposureScoreChart uses Recharts LineChart. Date range picker changes query params. CSV export: window.location = /api/reports/export?format=csv&...",
+            "SystemHealthPage: useQuery refetchInterval=30000. Services grid with green/amber/red dots. Disk bars warn at 80%."
+          ],
+          "verify": {
+            "commands": [
+              "cd frontend && npx vitest run src/__tests__/pages/ 2>&1 | tail -5"
+            ],
+            "expected": [
+              "passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S6-T3",
+          "title": "Login page and Onboarding wizard",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 4,
+          "reference": "DOC-11.pages.OnboardingPage",
+          "files_to_create": [
+            "frontend/src/pages/LoginPage.jsx",
+            "frontend/src/pages/OnboardingPage.jsx",
+            "frontend/src/components/onboarding/OnboardingWizard.jsx",
+            "frontend/src/components/onboarding/Step1AdminAccount.jsx",
+            "frontend/src/components/onboarding/Step2AddProfile.jsx",
+            "frontend/src/components/onboarding/Step3EmailConfig.jsx",
+            "frontend/src/components/onboarding/Step4N8nCheck.jsx",
+            "frontend/src/components/onboarding/Step5Complete.jsx",
+            "frontend/src/__tests__/pages/LoginPage.test.jsx",
+            "frontend/src/__tests__/pages/OnboardingPage.test.jsx"
+          ],
+          "onboarding_notes": [
+            "Step 2: profile form requires full_legal_name, date_of_birth, at least 1 address, 1 phone, 1 email before Next is enabled",
+            "Step 3: 'Send test email' calls POST /api/system/test-email (add this endpoint to system router). Show inline success/fail.",
+            "Step 5: 'Run first scan now' \u2192 POST /api/scans \u2192 store scan_run_id in scanProgressStore.activeScanRunId \u2192 redirect to /dashboard",
+            "Completion: localStorage.setItem('homeguard_onboarding_complete', 'true') \u2014 this is the ONLY other allowed localStorage use",
+            "App.jsx redirect: if admin + profiles.length === 0 AND localStorage.getItem('homeguard_onboarding_complete') !== 'true' \u2192 redirect /onboarding"
+          ],
+          "verify": {
+            "commands": [
+              "cd frontend && npx vitest run src/__tests__/pages/LoginPage.test.jsx src/__tests__/pages/OnboardingPage.test.jsx 2>&1 | tail -8"
+            ],
+            "expected": [
+              ">= 8 passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S6-T4",
+          "title": "Frontend coverage sweep",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 2,
+          "reference": "DOC-13.quality_gates",
+          "description": "Identify and fill coverage gaps to reach 75% line coverage threshold.",
+          "verify": {
+            "commands": [
+              "cd frontend && npx vitest run --coverage 2>&1 | grep -E 'Lines|Functions|Branches'"
+            ],
+            "expected": [
+              "Lines >= 75%",
+              "Functions >= 75%",
+              "Branches >= 70%"
+            ]
+          }
+        },
+        {
+          "id": "S6-T5",
+          "title": "E2E infrastructure \u2014 fake broker server, test compose, Playwright config",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 4,
+          "reference": "DOC-13.e2e_test_infrastructure",
+          "files_to_create": [
+            "e2e/playwright.config.ts",
+            "docker-compose.test.yml",
+            "e2e/helpers/fake_broker_server.py",
+            "e2e/global-setup.ts",
+            "e2e/global-teardown.ts",
+            "e2e/fixtures/auth.fixture.ts",
+            "e2e/fixtures/stack.fixture.ts",
+            "package.json"
+          ],
+          "notes": [
+            "docker-compose.test.yml: use homeguard_test_* volume names, SCAN_SCHEDULE_CRON=disabled, PLAYWRIGHT_PROXY_URL=http://localhost:8099",
+            "fake_broker_server.py: FastAPI on 8099. GET /search \u2192 HTML with 'Test User HomeGuard'. POST /optout/submit \u2192 'Your removal request has been submitted'.",
+            "auth.fixture.ts: page.goto('/login'), fill form, await response, context.storageState({path: 'e2e/.auth/admin.json'})",
+            "playwright.config.ts: globalSetup, globalTeardown, baseURL=http://localhost:3000, screenshot/video on failure, Chromium + Firefox"
+          ],
+          "verify": {
+            "commands": [
+              "cd e2e && npx playwright test --list 2>&1 | grep 'test files'"
+            ],
+            "expected": [
+              "test files found"
+            ]
+          }
+        },
+        {
+          "id": "S6-T6",
+          "title": "Write and run all E2E tests",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 4,
+          "reference": "DOC-13.e2e_test_infrastructure.e2e_test_specifications",
+          "files_to_create": [
+            "e2e/tests/auth.spec.ts",
+            "e2e/tests/onboarding.spec.ts",
+            "e2e/tests/scan_flow.spec.ts",
+            "e2e/tests/request_tracker.spec.ts",
+            "e2e/tests/reports.spec.ts",
+            "e2e/tests/broker_registry.spec.ts",
+            "e2e/tests/notifications.spec.ts",
+            "e2e/tests/system_health.spec.ts"
+          ],
+          "critical_e2e": [
+            "onboarding.spec.ts: test.describe('CP-11', ...) \u2014 completes all 5 steps ending with first scan trigger. Mark with test.use({tag: '@critical'}).",
+            "scan_flow.spec.ts: test.describe('CP-12', ...) \u2014 manual scan shows live progress bar movement. test.describe('CP-13', ...) \u2014 notification bell badge increments without page refresh.",
+            "All critical E2E tests tagged with @critical for grep filtering."
+          ],
+          "verify": {
+            "commands": [
+              "cd e2e && npx playwright test --reporter=list 2>&1 | tail -5"
+            ],
+            "expected": [
+              "passed, 0 failed"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "sprint": 7,
+      "title": "Security Hardening, Operations & Final Sign-off",
+      "goal": "All 12 security checks pass. Backup running. Household onboarded. System live and fully operational.",
+      "duration_days": 2,
+      "phase_refs": [
+        "Phase 10 final",
+        "Phase 11"
+      ],
+      "gate_checks": [
+        "All 13 critical paths pass (final run: pytest -m critical && playwright test --grep @critical)",
+        "All 12 security checks from DOC-12 pass",
+        "Daily backup cron installed and test backup decryptable",
+        "UFW status: active with LAN rules",
+        "fail2ban active with homeguard-login jail",
+        "At least 1 real household profile with PII fields",
+        "First scan completed \u2014 removal requests visible in dashboard"
+      ],
+      "tasks": [
+        {
+          "id": "S7-T1",
+          "title": "Apply host security hardening \u2014 UFW, fail2ban, GPG backup",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 2,
+          "reference": "DOC-12.host_hardening",
+          "commands_to_run": [
+            "sudo apt install ufw fail2ban -y",
+            "sudo ufw default deny incoming && sudo ufw default allow outgoing && sudo ufw allow ssh",
+            "sudo ufw allow from 192.168.0.0/16 to any port 3000 comment 'HomeGuard Dashboard'",
+            "sudo ufw allow from 192.168.0.0/16 to any port 8000 comment 'HomeGuard API'",
+            "sudo ufw allow from 192.168.0.0/16 to any port 5678 comment 'n8n UI'",
+            "sudo ufw --force enable",
+            "sudo tee /etc/fail2ban/jail.d/sshd.conf <<< '[sshd]\\nenabled=true\\nmaxretry=5\\nbantime=3600'",
+            "sudo tee /etc/fail2ban/jail.d/homeguard.conf <<< '[homeguard-login]\\nenabled=true\\nport=8000\\nmaxretry=10\\nbantime=1800'",
+            "sudo systemctl restart fail2ban",
+            "gpg --symmetric --cipher-algo AES256 --output ~/homeguard-secrets-backup.gpg .env"
+          ],
+          "verify": {
+            "commands": [
+              "sudo ufw status | head -1",
+              "sudo fail2ban-client status | grep 'Jail list'",
+              "gpg --decrypt ~/homeguard-secrets-backup.gpg | grep -c DB_ENCRYPTION_KEY"
+            ],
+            "expected": [
+              "Status: active",
+              "sshd",
+              "1"
+            ]
+          }
+        },
+        {
+          "id": "S7-T2",
+          "title": "Run all 12 security verification checks",
+          "status": "not_started",
+          "blocking": true,
+          "estimated_hours": 1,
+          "reference": "DOC-12.security_verification_checklist",
+          "description": "Execute every check from DOC-12.security_verification_checklist. All 12 must return expected output.",
+          "checks": [
+            {
+              "id": 1,
+              "cmd": "git -C . ls-files .env",
+              "expected": "no output"
+            },
+            {
+              "id": 2,
+              "cmd": "stat -c '%a' .env",
+              "expected": "600"
+            },
+            {
+              "id": 3,
+              "cmd": "grep -c CHANGE_ME .env",
+              "expected": "0"
+            },
+            {
+              "id": 4,
+              "cmd": "nc -zv localhost 5432 2>&1 | grep -c refused",
+              "expected": "1"
+            },
+            {
+              "id": 5,
+              "cmd": "nc -zv localhost 6379 2>&1 | grep -c refused",
+              "expected": "1"
+            },
+            {
+              "id": 6,
+              "cmd": "nc -zv localhost 8001 2>&1 | grep -c refused",
+              "expected": "1"
+            },
+            {
+              "id": 7,
+              "cmd": "curl -sf http://localhost:8000/api/system/health > /dev/null && echo OK",
+              "expected": "OK"
+            },
+            {
+              "id": 8,
+              "cmd": "for i in $(seq 11); do curl -s -o /dev/null -w '%{http_code}\\n' -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"x\",\"password\":\"x\"}'; done | tail -1",
+              "expected": "429"
+            },
+            {
+              "id": 9,
+              "cmd": "curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/api/webhooks/n8n -H 'Content-Type: application/json' -d '{\"source\":\"t\",\"brokers\":[]}'",
+              "expected": "401"
+            },
+            {
+              "id": 10,
+              "cmd": "curl -sI http://localhost:3000 | grep -c 'X-Frame-Options\\|X-Content-Type\\|Referrer'",
+              "expected": "3"
+            },
+            {
+              "id": 11,
+              "cmd": "sudo ufw status | head -1",
+              "expected": "Status: active"
+            },
+            {
+              "id": 12,
+              "cmd": "sudo systemctl is-active fail2ban",
+              "expected": "active"
+            }
+          ]
+        },
+        {
+          "id": "S7-T3",
+          "title": "Configure backup schedule and verify restore",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 2,
+          "reference": "DOC-12.backup_procedures, DOC-14.maintenance_schedule",
+          "steps": [
+            "Finalise scripts/backup.sh with 7-step procedure from DOC-12.backup_procedures.full_backup",
+            "chmod +x scripts/backup.sh",
+            "Install daily cron: (crontab -l 2>/dev/null; echo '0 1 * * * /home/{user}/homeguard/scripts/backup.sh >> /var/log/homeguard_backup.log 2>&1') | crontab -",
+            "Install quarterly reminder: (crontab -l 2>/dev/null; echo '0 9 1 */3 * echo HomeGuard 90-day review due >> /var/log/homeguard_reminders.log') | crontab -",
+            "Run manual backup: ./scripts/backup.sh",
+            "Verify backup: gpg --decrypt $(ls -t /var/backups/homeguard/*.gpg | head -1) | tar tz | head -5"
+          ],
+          "verify": {
+            "commands": [
+              "crontab -l | grep backup",
+              "ls /var/backups/homeguard/*.gpg | wc -l"
+            ],
+            "expected": [
+              "backup line shown",
+              ">= 1"
+            ]
+          }
+        },
+        {
+          "id": "S7-T4",
+          "title": "Final test suite run \u2014 all 13 critical paths",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 1,
+          "reference": "DOC-13.quality_gates",
+          "commands_to_run": [
+            "pytest tests/ -m critical -v --tb=short",
+            "pytest tests/ --cov=api --cov=workers --cov=mailwatcher --cov=playwright --cov-fail-under=80",
+            "cd frontend && npx vitest run --coverage",
+            "cd e2e && npx playwright test --grep @critical --reporter=list"
+          ],
+          "verify": {
+            "commands": [
+              "pytest tests/ -m critical 2>&1 | tail -3",
+              "cd e2e && npx playwright test --grep @critical 2>&1 | tail -3"
+            ],
+            "expected": [
+              "13 passed",
+              "passed, 0 failed"
+            ]
+          }
+        },
+        {
+          "id": "S7-T5",
+          "title": "Onboard first household member and complete sign-off",
+          "status": "not_started",
+          "blocking": false,
+          "estimated_hours": 0.5,
+          "reference": "DOC-15.completion_definition",
+          "steps": [
+            "Open dashboard at http://{host_ip}:3000",
+            "Complete onboarding wizard with real household member PII",
+            "Add all current and historical addresses, phones, emails, aliases",
+            "Trigger first full scan from Step 5 of onboarding wizard",
+            "Confirm scan progress bar visible and moving",
+            "Wait for scan completion \u2014 verify removal requests created",
+            "Confirm all 8 completion criteria from DOC-15 are met"
+          ],
+          "completion_criteria_check": [
+            "pytest tests/ -m critical AND cd e2e && npx playwright test --grep @critical \u2014 all pass",
+            "Backend coverage >= 80%, frontend >= 75%",
+            "All 12 security checks pass (S7-T2)",
+            "Backup schedule running (S7-T3)",
+            "curl /api/system/stats shows profiles_count >= 1 AND total_removal_requests >= 1",
+            "curl /api/system/health shows all services healthy"
+          ],
+          "verify": {
+            "commands": [
+              "TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"'$ADMIN_PASSWORD'\"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)[\"data\"][\"token\"])')",
+              "curl -s http://localhost:8000/api/system/stats -H \"Authorization: Bearer $TOKEN\" | python3 -c \"import sys,json; d=json.load(sys.stdin)['data']; print('profiles:', d['profiles_count'], '| requests:', d['total_removal_requests'], '| brokers:', d['brokers_monitored'])\""
+            ],
+            "expected": [
+              "profiles: >= 1 | requests: >= 1 | brokers: >= 50"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
