@@ -3,9 +3,8 @@ HomeGuard Database Connection Module
 Async SQLAlchemy engine with connection pooling.
 """
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import event
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 
 def get_database_url() -> str:
@@ -51,6 +50,16 @@ async def get_db():
             raise
         finally:
             await session.close()
+
+
+# Alias used by services that expect 'get_session'
+get_session = get_db
+
+# Alias used by routers that expect 'get_db_session' (async)
+get_db_session = get_db
+
+# Alias used by routers that expect 'get_async_db' (async)
+get_async_db = get_db
 
 
 async def init_db():

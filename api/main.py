@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine
+from routers import auth, profiles, brokers, webhooks
 
 logger = logging.getLogger(__name__)
 
@@ -73,20 +74,11 @@ async def health_check():
         },
     }
 
-@app.get("/api/system/stats")
-async def get_stats():
-    """System statistics - requires authentication (placeholder)."""
-    return {
-        "success": True,
-        "data": {
-            "profiles_count": 0,
-            "brokers_monitored": 0,
-            "total_removal_requests": 0,
-            "pending_requests": 0,
-            "confirmed_removals": 0,
-            "exposure_score": 0,
-        },
-    }
+# --- Router registration ---
+app.include_router(auth.router, prefix="/api")
+app.include_router(profiles.router, prefix="/api")
+app.include_router(brokers.router, prefix="/api")
+app.include_router(webhooks.router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

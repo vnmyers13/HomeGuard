@@ -4,6 +4,7 @@ sqlalchemy[asyncio]==2.0.23
 asyncpg==0.29.0
 alembic==1.13.0
 pyjwt==2.8.0
+cryptography>=41.0,<44.0
 passlib[bcrypt]==1.7.4
 python-dotenv==1.0.0
 slowapi==0.1.9
@@ -12,8 +13,10 @@ redis>=4.0,<6.0
 jinja2==3.1.2
 # weasyprint==60.2  # Added in Sprint 4 when legal letters are implemented
 pydantic==2.5.2
+email-validator>=2.0,<3.0
 httpx==0.25.2
 jsonschema==4.19.2
+structlog==23.2.0
 testcontainers[postgres]==4.0.1
 pytest==7.4.3
 pytest-asyncio==0.21.1
