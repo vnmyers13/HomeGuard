@@ -104,6 +104,7 @@ services:
       - ./playbooks:/app/playbooks:ro
       - ./scripts:/app/scripts:ro
       - ./migrations:/app/migrations
+      - ./tests:/app/tests:ro
     networks:
       - homeguard_net
       - homeguard_egress
