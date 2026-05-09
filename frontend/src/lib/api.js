@@ -1,0 +1,175 @@
+/**
+ * API client layer - axios instance with auth interceptors.
+ * 
+ * JWT tokens are kept in memory only (CP-10 compliance).
+ * Tokens are NOT stored in localStorage or sessionStorage.
+ */
+
+import axios from 'axios';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+
+const api = axios.create({
+  baseURL: API_BASE,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 15000,
+});
+
+// In-memory token storage - never persisted to localStorage
+let accessToken = null;
+let refreshToken = null;
+
+/**
+ * Set tokens in memory after login/register.
+ */
+export function setTokens(access, refresh) {
+  accessToken = access;
+  refreshToken = refresh;
+}
+
+/**
+ * Clear tokens on logout.
+ */
+export function clearTokens() {
+  accessToken = null;
+  refreshToken = null;
+}
+
+/**
+ * Get current access token (for external use).
+ */
+export function getAccessToken() {
+  return accessToken;
+}
+
+// Request interceptor - attach Authorization header
+api.interceptors.request.use(
+  (config) => {
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor - handle 401 with token refresh
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+
+    // Only retry once on 401, and only if we haven't already retried
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      refreshToken
+    ) {
+      originalRequest._retry = true;
+
+      try {
+        // Try to refresh the token
+        const response = await axios.post(`${API_BASE}/auth/refresh`, {
+          refresh_token: refreshToken,
+        });
+
+        const newAccess = response.data?.data?.access_token;
+        const newRefresh = response.data?.data?.refresh_token;
+
+        if (newAccess) {
+          accessToken = newAccess;
+        }
+        if (newRefresh) {
+          refreshToken = newRefresh;
+        }
+
+        // Retry original request with new token
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        // Refresh failed - clear tokens and let the app handle logout
+        clearTokens();
+        return Promise.reject(refreshError);
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+// --- Auth endpoints (no auth header needed) ---
+
+export const authApi = {
+  register: (data) => api.post('/auth/register', data),
+  login: (data) => api.post('/auth/login', data),
+  verify: () => api.get('/auth/verify'),
+  logout: () => api.post('/auth/logout'),
+  changePassword: (data) => api.post('/auth/change-password', data),
+};
+
+// --- Profile endpoints ---
+
+export const profilesApi = {
+  list: (params) => api.get('/profiles', { params }),
+  get: (id) => api.get(`/profiles/${id}`),
+  create: (data) => api.post('/profiles', data),
+  update: (id, data) => api.patch(`/profiles/${id}`, data),
+  delete: (id) => api.delete(`/profiles/${id}`),
+  addField: (profileId, data) => api.post(`/profiles/${profileId}/fields`, data),
+  removeField: (profileId, fieldId) => api.delete(`/profiles/${profileId}/fields/${fieldId}`),
+};
+
+// --- Broker endpoints ---
+
+export const brokersApi = {
+  list: (params) => api.get('/brokers', { params }),
+  get: (id) => api.get(`/brokers/${id}`),
+  create: (data) => api.post('/brokers', data),
+  update: (id, data) => api.patch(`/brokers/${id}`, data),
+  delete: (id) => api.delete(`/brokers/${id}`),
+  healthCheck: (domain) => api.get(`/brokers/health`, { params: { domain } }),
+  triggerScan: (data) => api.post('/brokers/scan', data),
+};
+
+// --- Scan endpoints ---
+
+export const scansApi = {
+  list: (params) => api.get('/scans', { params }),
+  get: (id) => api.get(`/scans/${id}`),
+  trigger: (data) => api.post('/scans', data),
+  cancel: (id) => api.post(`/scans/${id}/cancel`),
+};
+
+// --- Webhook endpoints ---
+
+export const webhooksApi = {
+  list: () => api.get('/webhooks'),
+  create: (data) => api.post('/webhooks', data),
+  update: (id, data) => api.patch(`/webhooks/${id}`, data),
+  delete: (id) => api.delete(`/webhooks/${id}`),
+  test: (id) => api.post(`/webhooks/${id}/test`),
+};
+
+// --- System endpoints ---
+
+export const systemApi = {
+  health: () => api.get('/system/health'),
+};
+
+// --- Convenience exports (shorthand) ---
+
+export const getProfiles = profilesApi.list;
+export const createProfile = profilesApi.create;
+export const updateProfile = (id, data) => profilesApi.update(id, data);
+export const deleteProfile = profilesApi.delete;
+export const getProfile = profilesApi.get;
+
+export const getBrokers = brokersApi.list;
+export const triggerScan = brokersApi.triggerScan;
+
+export const getScans = scansApi.list;
+export const triggerScanJob = scansApi.trigger;
+
+export default api;

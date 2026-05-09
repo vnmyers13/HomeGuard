@@ -2,7 +2,7 @@
 
 Automated personal data removal and monitoring platform. Discovers your personal data across data broker sites and submits removal requests automatically.
 
-> **Status:** Sprint 1 Complete — Backend API foundation delivered. Sprint 2 (Frontend & Production Hardening) in progress.
+> **Status:** v0.2.0 — Sprint 2 Complete! Full-stack application with React dashboard, authentication, profiles API, broker catalog, and scan management. [Release Notes](RELEASE_NOTES.md)
 
 ---
 
@@ -39,14 +39,14 @@ Automated personal data removal and monitoring platform. Discovers your personal
 
 | Service       | Port  | URL                                  | Description                |
 |---------------|-------|--------------------------------------|----------------------------|
-| Frontend      | 3000  | http://localhost:3000                | React dashboard            |
+| Frontend      | 5173  | http://localhost:5173                | React dashboard (dev)      |
+| Frontend      | 80    | http://localhost                     | React dashboard (prod)     |
 | API           | 8000  | http://localhost:8000                | FastAPI REST API           |
 | API Docs      | 8000  | http://localhost:8000/docs           | Swagger/OpenAPI docs       |
 | Redis         | 6379  | internal                             | Celery message broker      |
 | PostgreSQL    | 5432  | internal                             | Primary database           |
 | Playwright    | 8001  | internal                             | Browser automation         |
 | Mailwatcher   | 8002  | internal                             | Email monitoring           |
-| n8n           | 5678  | http://localhost:5678                | Workflow automation        |
 
 ## Quick Start
 
@@ -141,17 +141,48 @@ HomeGuard/
 
 ## API Overview
 
-### Core Endpoints
+### Authentication (`/api/auth`)
 
-| Method | Endpoint                | Description              |
-|--------|-------------------------|--------------------------|
-| POST   | `/api/auth/register`    | Create new user account  |
-| POST   | `/api/auth/login`       | Authenticate & get token |
-| GET    | `/api/profiles/`        | List user profiles       |
-| POST   | `/api/profiles/`        | Create new profile       |
-| GET    | `/api/brokers/`         | List data brokers         |
-| POST   | `/api/webhooks/`        | Create webhook           |
-| GET    | `/api/system/health`    | Health check             |
+| Method | Endpoint              | Description                |
+|--------|-----------------------|----------------------------|
+| POST   | `/api/auth/register`  | Create new user account    |
+| POST   | `/api/auth/login`     | Authenticate & get tokens  |
+| POST   | `/api/auth/refresh`   | Refresh access token       |
+| POST   | `/api/auth/logout`    | Invalidate refresh token   |
+
+### Profiles (`/api/profiles`)
+
+| Method | Endpoint              | Description                |
+|--------|-----------------------|----------------------------|
+| GET    | `/api/profiles/`      | List household profiles    |
+| POST   | `/api/profiles/`      | Create new profile         |
+| GET    | `/api/profiles/{id}`  | Get profile detail         |
+| PUT    | `/api/profiles/{id}`  | Update profile             |
+| DELETE | `/api/profiles/{id}`  | Delete profile             |
+
+### Brokers (`/api/brokers`)
+
+| Method | Endpoint              | Description                |
+|--------|-----------------------|----------------------------|
+| GET    | `/api/brokers/`       | List data broker playbooks |
+| GET    | `/api/brokers/{slug}` | Get broker detail          |
+
+### Webhooks (`/api/webhooks`)
+
+| Method | Endpoint              | Description                |
+|--------|-----------------------|----------------------------|
+| POST   | `/api/webhooks/`      | Create webhook endpoint    |
+| GET    | `/api/webhooks/`      | List webhook endpoints     |
+| DELETE | `/api/webhooks/{id}`  | Delete webhook endpoint    |
+
+### Scans (`/api/scans`)
+
+| Method | Endpoint              | Description                |
+|--------|-----------------------|----------------------------|
+| GET    | `/api/scans/`         | List deletion scans        |
+| GET    | `/api/scans/{id}`     | Get scan detail            |
+| POST   | `/api/scans/`         | Trigger new scan           |
+| POST   | `/api/scans/{id}/cancel` | Cancel running scan      |
 
 ### Authentication
 
@@ -193,12 +224,14 @@ All list responses include `_links` metadata for API discoverability:
 
 ## Broker Playbooks
 
-HomeGuard supports **21 data brokers** out of the box:
+HomeGuard supports **28 data brokers** out of the box:
 
-- Spokeo, Whitepages, BeenVerified, InstantCheckMate
-- PeopleFinder, Radaris, TruthFinder, Intelius
-- PublicRecords, FastPeopleSearch, USSearch
-- And 10 more...
+- Spokeo, Whitepages, BeenVerified, InstantCheckMate, TruthFinder
+- PeopleFinder, PeopleFinders, Radaris, Intelius
+- PublicRecords, FastPeopleSearch, USSearch, FindMyPast
+- LifeUpdates, AB eBooks People Search, Freedom People Search
+- Addresses.com, Advanced Background Checks, BackgroundCheckSter
+- That's My Legal Name, PeopleSmart
 
 Each broker has a JSON playbook defining automation steps for discovery and removal. See `playbooks/brokers/` for details.
 
@@ -267,19 +300,24 @@ Project context and decisions documented in `memory-bank/`:
 - [x] Docker infrastructure
 - [x] Database migrations
 
-### Sprint 2 🚧 IN PROGRESS
-- [ ] React frontend dashboard
-- [ ] End-to-end test suite
-- [ ] Playwright executor hardening
-- [ ] Mailwatcher Gmail API integration
-- [ ] Performance benchmarking
-- [ ] Security audit
+### Sprint 2 ✅ COMPLETE (v0.2.0)
+- [x] React frontend dashboard (Vite + Tailwind + Zustand)
+- [x] Authentication pages (Login, Register with JWT)
+- [x] Profile Management page (CRUD for household members)
+- [x] Household, Brokers catalog, Scans history pages
+- [x] Protected routing with auth store
+- [x] Brokers Catalog API (28 playbooks)
+- [x] Scans API (list/detail/trigger/cancel)
+- [x] Webhooks API (create/list/delete)
+- [x] Frontend Docker + Nginx configuration
 
-### Sprint 3 (Planned)
-- [ ] Broker automation execution
-- [ ] Removal request workflows
-- [ ] Email confirmation processing
-- [ ] Reporting and analytics dashboard
+### Sprint 3 (Next)
+- [ ] Playwright executor integration with broker playbooks
+- [ ] Celery task execution pipeline (scan → discover → delete → report)
+- [ ] Mailwatcher email processing for confirmations
+- [ ] n8n workflow orchestration between services
+- [ ] End-to-end test suite
+- [ ] Password reset flow
 
 ## License
 

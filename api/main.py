@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine
-from routers import auth, profiles, brokers, webhooks
+from routers import auth, profiles, brokers, webhooks, scans
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,7 @@ app.include_router(auth.router, prefix="/api")
 app.include_router(profiles.router, prefix="/api")
 app.include_router(brokers.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
+app.include_router(scans.router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

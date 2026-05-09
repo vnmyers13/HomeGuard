@@ -1,21 +1,63 @@
-import React from 'react'
+/**
+ * HomeGuard Frontend - Root App Component
+ *
+ * Sprint 2: Authentication + protected routing.
+ * Public routes: /login, /register
+ * Protected routes: / (dashboard wrapper around Overview), /profile, /household, /brokers, /scans
+ */
 
-function App() {
-  return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-900 flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-gray-800 dark:text-white mb-4">
-          HomeGuard
-        </h1>
-        <p className="text-lg text-gray-600 dark:text-gray-400">
-          Privacy Protection Platform
-        </p>
-        <p className="mt-8 text-sm text-gray-500">
-          Sprint 1: Foundation & Database Schema — Complete
-        </p>
-      </div>
-    </div>
-  )
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import DashboardLayout from './components/DashboardLayout';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Overview from './pages/Overview';
+import Profile from './pages/Profile';
+import Household from './pages/Household';
+import Brokers from './pages/Brokers';
+import Scans from './pages/Scans';
+import { useAuthStore } from './stores/authStore';
+
+// ----------------------
+// Protected Route Guard
+// ----------------------
+function ProtectedRoute({ children }) {
+  const { isAuthenticated } = useAuthStore();
+
+  if (!isAuthenticated) {
+    // Not authenticated -> redirect to login
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
 }
 
-export default App
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+
+        {/* Protected dashboard routes */}
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Overview />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="household" element={<Household />} />
+          <Route path="brokers" element={<Brokers />} />
+          <Route path="scans" element={<Scans />} />
+        </Route>
+
+        {/* Fallback: redirect to dashboard */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}

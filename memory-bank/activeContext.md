@@ -1,74 +1,61 @@
 # Active Context
 
-**Last Updated:** 2026-05-07
+**Last Updated**: 2026-05-09
 
----
+## Sprint 2 Status: COMPLETE
 
-## Current Sprint: Sprint 2
+Sprint 2 delivered a fully functional authentication system, core REST API (auth, profiles, brokers, webhooks, scans), and a React dashboard with 6 pages. All code is written, routers registered, and frontend routing configured.
 
-### Sprint 1: COMPLETE ✅
-Sprint 1 delivered the complete backend foundation:
-- All API models, schemas, services, and routers implemented
-- Celery worker tasks for scanning pipeline
-- Unit tests for auth, profiles, brokers, and webhooks
-- Docker infrastructure and database migrations
+## Sprint 3 Focus: Playwright Executor & Task Orchestration
 
-### Sprint 2: IN PROGRESS 🚧
-**Focus:** Frontend dashboard, e2e tests, production hardening
+Sprint 3 implements the core data broker interaction engine:
+1. **Playwright Executor** ✅ - COMPLETE. Browser automation with playbook-driven navigation
+2. **Celery Task Integration** - Connect scan trigger API → Celery task → Playwright executor
+3. **Mailwatcher** - Email monitoring for confirmation/response processing
+4. **n8n Workflows** - Workflow orchestration between services
+5. **E2E Tests** - Playwright-based end-to-end test suite
 
-#### Current Work
-- Sprint planning documentation created (sprint2/kickoff.md, sprint2/plan.md)
-- Memory bank updated with Sprint 2 context
-- Backend worker tasks finalized (scanning, maintenance, registry)
+### Playwright Executor Service (Complete)
+The executor service is fully implemented with 8 modules:
+- `playwright/models.py` - Pydantic models (ExecutionState, JobRequest, PlaybookStep, StepResult, HealthStatus, etc.)
+- `playwright/pool.py` - Browser pool with anti-detection flags, health monitoring, startup sequence
+- `playwright/token_resolver.py` - Token/cookie resolver with template engine and variable substitution
+- `playwright/actions.py` - 16 action handlers (navigate, fill_form, click, wait, screenshot, submit, select, hover, scroll, type_text, check_text, uncheck_text, download, conditional, loop, execute_js)
+- `playwright/screenshot.py` - Smart screenshot utility with full/page/element capture
+- `playwright/executor.py` - PlaybookExecutor engine (~500 lines) with confirmation system, CAPTCHA detection, error classification
+- `playwright/main.py` - FastAPI service with 3 endpoints (POST /jobs, GET /jobs/{id}, GET /health)
+- `playwright/user_agents.json` - Chrome/Edge user agent pool for rotation
 
-#### Immediate Next Steps
-1. **Frontend React Dashboard** - Primary focus for Sprint 2
-   - Install dependencies (react-query, react-router-dom, axios)
-   - Build authentication pages (login, register)
-   - Create dashboard layout with sidebar navigation
-   - Implement profile management views
-   - Add scan results visualization
-   - Build webhook configuration UI
+## Recent Changes (Sprint 3)
+- Implemented complete Playwright Executor service with browser pool, token resolver, 16 action handlers, playbook executor engine
+- Added anti-detection measures: random viewport/user agent, WebDriver flag override, human-like delays
+- Built confirmation system with CAPTCHA detection and error classification (retryable/fatal/partial)
+- Integrated FastAPI endpoints for job submission, status tracking, and health monitoring
 
-2. **End-to-End Tests**
-   - Set up Playwright test suite for browser testing
-   - Test full auth flow (register → login → create profile → run scan)
-   - Validate API integration with frontend
-
-3. **Production Hardening**
-   - Playwright executor retry logic and error handling
-   - Mailwatcher Gmail API integration
-   - Performance benchmarking
-   - Security audit (OWASP Top 10)
-
----
-
-## Recent Changes (Sprint 1 Close)
-- Created `api/workers/tasks/scanning.py` - Core scan pipeline tasks
-- Created `api/workers/tasks/maintenance.py` - Cleanup and health check tasks
-- Updated `api/workers/tasks/__init__.py` - Task package registry
-- Updated `memory-bank/progress.md` - Sprint 1 completion, Sprint 2 kickoff
-- Updated `memory-bank/activeContext.md` - Current focus shifted to Sprint 2
-
----
+## Recent Changes (Sprint 2)
+- Created all FastAPI routers: auth, profiles, brokers, webhooks, scans
+- Implemented service layer for each domain
+- Built React frontend with protected routing, 6 pages, Zustand auth store
+- Configured Docker Compose with 5 services (api, frontend, postgres, redis, celery-worker)
+- Wrote unit tests for auth, profiles, brokers, webhooks
+- Created Alembic migration for initial schema
 
 ## Important Patterns & Preferences
-- **Service Layer Pattern:** Models → Services → Routers (clean separation)
-- **Async First:** All database operations use async SQLAlchemy
-- **Task Registry:** Celery tasks registered via `@celery_app.task` decorator
-- **HATEOAS:** API responses include `_links` metadata for discoverability
-- **Error Handling:** Consistent try/catch with structured logging
+- **API responses**: Always wrapped in `{ success: bool, data?: ..., error_code?: string, message?: string }`
+- **Auth**: JWT access tokens (short-lived) + refresh tokens (stored in Redis for blacklisting)
+- **Database**: PostgreSQL with SQLAlchemy async, UUID primary keys, RowVersioned mixin for optimistic locking
+- **Frontend**: React + Vite + Tailwind, Zustand for state, react-query for data fetching
+- **Task queue**: Celery with Redis broker
+- **Browser automation**: Playwright with JSON playbook-driven navigation
 
-## Learnings
-- Thorough planning in Sprint 1 enabled rapid implementation
-- Memory bank documentation critical for context retention
-- Type hints throughout codebase improve maintainability
-- Docker-based development ensures environment consistency
+## Key Learnings
+- npm not available on host machine - frontend builds inside Docker containers
+- Scan trigger API creates DB record but Celery task dispatch is deferred to Sprint 3
+- Logout requires Redis connectivity for token blacklisting
 
----
-
-## Open Questions / Considerations
-1. Frontend state management: React Query vs Redux (leaning toward React Query)
-2. Charting library for exposure score visualization (recharts recommended)
-3. Form validation strategy (zod + react-hook-form)
-4. API rate limiting implementation for production
+## Next Immediate Steps
+1. Write unit tests for Playwright executor (test_executor.py, test_pool.py, test_actions.py)
+2. Wire Celery `run_scan_task` to call Playwright executor via HTTP or direct import
+3. Add scan result capture and E-E-A-I evidence storage
+4. Implement Mailwatcher email processing pipeline
+5. Docker integration testing for playwright service
