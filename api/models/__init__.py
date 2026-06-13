@@ -1,5 +1,5 @@
 """
-HomeGuard SQLAlchemy Models
+OpenDataRemoval SQLAlchemy Models
 All models across 9 schemas with PII encryption support.
 """
 import os

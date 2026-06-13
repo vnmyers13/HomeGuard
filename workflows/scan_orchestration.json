@@ -1,0 +1,314 @@
+{
+  "name": "OpenDataRemoval Scan Orchestration",
+  "description": "Orchestrates the full scan lifecycle: trigger → Celery task → Playwright execution → result processing → notification",
+  "nodes": [
+    {
+      "id": "trigger_start",
+      "name": "Scan Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scan-trigger",
+        "responseMode": "responseNode",
+        "options": {
+          "respondWith": "allItems"
+        }
+      },
+      "notes": "Receives scan trigger from OpenDataRemoval API with profile_id, household_members, and broker list."
+    },
+    {
+      "id": "validate_payload",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.profile_id }}",
+              "operation": "isNotEmpty"
+            }
+          ],
+          "array": [
+            {
+              "value1": "={{ $json.body.members }}",
+              "operation": "notEmpty"
+            }
+          ]
+        }
+      },
+      "notes": "Validates required fields: profile_id, members array."
+    },
+    {
+      "id": "split_members",
+      "name": "Split Members",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "notes": "Processes each household member sequentially."
+    },
+    {
+      "id": "split_brokers",
+      "name": "Split Brokers",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [660, 0],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "notes": "Processes each broker sequentially for the current member."
+    },
+    {
+      "id": "trigger_celery",
+      "name": "Trigger Celery Task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.CELERY_BROKER_URL || 'http://celery-flower:5555' }}/api/task",
+        "body": "={\n  \"task\": \"opendataremoval.tasks.run_scan_task\",\n  \"args\": [\n    {{ $json.body.profile_id }},\n    {{ JSON.stringify($json.item.json) }},\n    {{ $json.body.broker_domain }}\n  ]\n}",
+        "options": {
+          "redirect": true
+        }
+      },
+      "notes": "Submits individual scan task to Celery worker pool."
+    },
+    {
+      "id": "poll_task_status",
+      "name": "Poll Task Status",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1100, 0],
+      "parameters": {
+        "waitTime": 30,
+        "generateItem": false
+      },
+      "notes": "Waits for Celery task to complete (polls every 30s)."
+    },
+    {
+      "id": "fetch_task_result",
+      "name": "Fetch Task Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1320, 0],
+      "parameters": {
+        "httpMethod": "GET",
+        "url": "={{ $env.CELERY_BROKER_URL || 'http://celery-flower:5555' }}/api/task/result/{{ $json.task_id }}"
+      },
+      "notes": "Retrieves task result from Celery backend."
+    },
+    {
+      "id": "classify_result",
+      "name": "Classify Result",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1540, 0],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "completed"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "error"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "requires_manual"
+            }
+          ]
+        }
+      },
+      "notes": "Routes based on scan result status."
+    },
+    {
+      "id": "store_result",
+      "name": "Store Result in DB",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1760, -220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/scan-results",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Stores completed scan result in OpenDataRemoval database."
+    },
+    {
+      "id": "error_handler",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1760, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/scan-errors",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Records scan errors for retry and alerting."
+    },
+    {
+      "id": "manual_review",
+      "name": "Manual Review Queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1760, 220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/manual-review",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Queues scans requiring manual review (CAPTCHA, etc.)."
+    },
+    {
+      "id": "notify_webhook",
+      "name": "Notify Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [1980, -220],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "scan-complete",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Notifies upstream systems of scan completion via webhook."
+    },
+    {
+      "id": "aggregate_results",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [2200, 0],
+      "parameters": {
+        "mode": "combine"
+      },
+      "notes": "Aggregates results from all member+broker combinations."
+    },
+    {
+      "id": "final_response",
+      "name": "Final Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2420, 0],
+      "parameters": {
+        "responseBody": "={{ JSON.stringify({ status: 'completed', aggregate: $json }) }}",
+        "options": {}
+      },
+      "notes": "Returns aggregated scan results to the original caller."
+    }
+  ],
+  "connections": {
+    "trigger_start": {
+      "main": [
+        [{ "node": "validate_payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "validate_payload": {
+      "main": [
+        [{ "node": "split_members", "type": "main", "index": 0 }]
+      ]
+    },
+    "split_members": {
+      "main": [
+        [{ "node": "split_brokers", "type": "main", "index": 0 }],
+        [{ "node": "aggregate_results", "type": "main", "index": 0 }]
+      ]
+    },
+    "split_brokers": {
+      "main": [
+        [{ "node": "trigger_celery", "type": "main", "index": 0 }],
+        [{ "node": "split_members", "type": "main", "index": 1 }]
+      ]
+    },
+    "trigger_celery": {
+      "main": [
+        [{ "node": "poll_task_status", "type": "main", "index": 0 }]
+      ]
+    },
+    "poll_task_status": {
+      "main": [
+        [{ "node": "fetch_task_result", "type": "main", "index": 0 }]
+      ]
+    },
+    "fetch_task_result": {
+      "main": [
+        [{ "node": "classify_result", "type": "main", "index": 0 }]
+      ]
+    },
+    "classify_result": {
+      "main": [
+        [{ "node": "store_result", "type": "main", "index": 0 }],
+        [{ "node": "error_handler", "type": "main", "index": 0 }],
+        [{ "node": "manual_review", "type": "main", "index": 0 }]
+      ]
+    },
+    "store_result": {
+      "main": [
+        [{ "node": "notify_webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "error_handler": {
+      "main": [
+        [{ "node": "split_brokers", "type": "main", "index": 1 }]
+      ]
+    },
+    "manual_review": {
+      "main": [
+        [{ "node": "split_brokers", "type": "main", "index": 1 }]
+      ]
+    },
+    "notify_webhook": {
+      "main": [
+        [{ "node": "split_brokers", "type": "main", "index": 1 }]
+      ]
+    },
+    "aggregate_results": {
+      "main": [
+        [{ "node": "final_response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "saveExecutionProgressOnClick": true,
+    "errorWorkflow": "error_handler_workflow"
+  },
+  "staticData": {
+    "description": "Scan orchestration workflow that processes household members across multiple data broker sites.",
+    "version": "1.0.0",
+    "environment_vars": [
+      "HOMEGUARD_API_URL",
+      "CELERY_BROKER_URL",
+      "PLAYWRIGHT_SERVICE_URL"
+    ]
+  }
+}

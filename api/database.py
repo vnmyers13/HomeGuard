@@ -1,5 +1,5 @@
 """
-HomeGuard Database Connection Module
+OpenDataRemoval Database Connection Module
 Async SQLAlchemy engine with connection pooling.
 """
 import os
@@ -11,7 +11,7 @@ def get_database_url() -> str:
     """Construct async DATABASE_URL from environment."""
     return os.environ.get(
         "DATABASE_URL",
-        "postgresql+asyncpg://homeguard:homeguard@db:5432/homeguard"
+        "postgresql+asyncpg://opendataremoval:opendataremoval@db:5432/opendataremoval"
     )
 
 

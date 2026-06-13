@@ -1,0 +1,200 @@
+{
+  "name": "OpenDataRemoval Email Processing",
+  "description": "Processes emails from Mailwatcher: parse → classify → update scan/opt-out status → notify",
+  "nodes": [
+    {
+      "id": "email_trigger",
+      "name": "Email Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-process",
+        "responseMode": "responseNode",
+        "options": {
+          "respondWith": "allItems"
+        }
+      },
+      "notes": "Receives email data from Mailwatcher webhook."
+    },
+    {
+      "id": "parse_email",
+      "name": "Parse Email Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "jsCode": "// Parse email content and extract key fields\nconst email = $json.body;\nreturn {\n  from: email.from,\n  subject: email.subject,\n  body: email.body,\n  html: email.html,\n  date: email.date,\n  message_id: email.message_id\n};"
+      },
+      "notes": "Extracts from, subject, body, and metadata from email."
+    },
+    {
+      "id": "classify_email",
+      "name": "Classify Email Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [440, 0],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.subject.toLowerCase() }}",
+                  "operation": "contains"
+                }
+              },
+              "outputId": "scan_confirmation"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.subject.toLowerCase() }}",
+                  "operation": "contains"
+                }
+              },
+              "outputId": "optout_confirmation"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.subject.toLowerCase() }}",
+                  "operation": "contains"
+                }
+              },
+              "outputId": "token_refresh"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.subject }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "other"
+            }
+          ]
+        }
+      },
+      "notes": "Classifies email as scan confirmation, opt-out confirmation, token refresh, or other."
+    },
+    {
+      "id": "scan_confirmation_handler",
+      "name": "Scan Confirmation Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, -220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/email-scan-confirmation",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Updates scan status to confirmed via API."
+    },
+    {
+      "id": "optout_confirmation_handler",
+      "name": "Opt-Out Confirmation Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/email-optout-confirmation",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Confirms opt-out via email confirmation."
+    },
+    {
+      "id": "token_refresh_handler",
+      "name": "Token Refresh Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, 220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/token-refresh",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Updates broker token from email."
+    },
+    {
+      "id": "notify_user",
+      "name": "Notify User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/notifications",
+        "body": "={{ JSON.stringify({ type: 'email_processed', email_type: $json.email_type, status: 'success' }) }}"
+      },
+      "notes": "Sends notification to user about email processing result."
+    },
+    {
+      "id": "email_response",
+      "name": "Email Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1100, 0],
+      "parameters": {
+        "responseBody": "={{ JSON.stringify({ status: 'processed', email_type: $json.email_type }) }}",
+        "options": {}
+      },
+      "notes": "Returns email processing result."
+    }
+  ],
+  "connections": {
+    "email_trigger": {
+      "main": [
+        [{ "node": "parse_email", "type": "main", "index": 0 }]
+      ]
+    },
+    "parse_email": {
+      "main": [
+        [{ "node": "classify_email", "type": "main", "index": 0 }]
+      ]
+    },
+    "classify_email": {
+      "main": [
+        [{ "node": "scan_confirmation_handler", "type": "main", "index": 0 }],
+        [{ "node": "optout_confirmation_handler", "type": "main", "index": 0 }],
+        [{ "node": "token_refresh_handler", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "scan_confirmation_handler": {
+      "main": [
+        [{ "node": "notify_user", "type": "main", "index": 0 }]
+      ]
+    },
+    "optout_confirmation_handler": {
+      "main": [
+        [{ "node": "notify_user", "type": "main", "index": 0 }]
+      ]
+    },
+    "token_refresh_handler": {
+      "main": [
+        [{ "node": "notify_user", "type": "main", "index": 0 }]
+      ]
+    },
+    "notify_user": {
+      "main": [
+        [{ "node": "email_response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "error_handler_workflow"
+  },
+  "staticData": {
+    "description": "Email processing workflow for Mailwatcher confirmations.",
+    "version": "1.0.0",
+    "environment_vars": [
+      "HOMEGUARD_API_URL"
+    ]
+  }
+}

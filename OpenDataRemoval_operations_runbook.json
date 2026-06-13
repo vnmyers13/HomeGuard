@@ -1,0 +1,812 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 Operations & Runbook",
+  "version": "1.0",
+  "date": "May 2026",
+  "description": "Day-to-day operational procedures, maintenance schedules, upgrade paths, and troubleshooting guide for the OpenDataRemoval self-hosted stack.",
+  "design_decisions": {
+    "troubleshooting_structure": "Symptom index maps to component-level diagnosis \u2014 operator finds by what they see, resolves at the service level",
+    "maintenance_schedule": "Weekly + monthly + quarterly procedures",
+    "upgrade_scope": "Docker image upgrades + Python/Node dependency updates + Alembic migration guide"
+  },
+  "quick_reference": {
+    "dashboard_url": "http://{host_ip}:3000",
+    "api_health_url": "http://{host_ip}:8000/api/system/health",
+    "n8n_url": "http://{host_ip}:5678",
+    "project_directory": "/home/{deploy_user}/opendataremoval",
+    "log_command": "docker compose logs -f --tail=100 {service}",
+    "restart_all": "docker compose restart",
+    "restart_one": "docker compose restart {service}",
+    "stop_all": "docker compose down",
+    "start_all": "docker compose up -d",
+    "db_shell": "docker compose exec db psql -U opendataremoval opendataremoval",
+    "worker_shell": "docker compose exec worker bash",
+    "health_check": "curl -s http://localhost:8000/api/system/health | python3 -m json.tool"
+  },
+  "daily_operations": {
+    "automated_tasks": {
+      "description": "These run automatically \u2014 no manual intervention required under normal conditions",
+      "tasks": [
+        {
+          "time": "02:00",
+          "task": "Daily full scan (all profiles, all brokers)",
+          "celery_task": "dispatch_daily_scan",
+          "log": "docker compose logs worker | grep dispatch_daily_scan"
+        },
+        {
+          "time": "03:00",
+          "task": "Screenshot purge (files past SCREENSHOT_RETENTION_DAYS)",
+          "celery_task": "purge_expired_screenshots"
+        },
+        {
+          "time": "Every 15 min",
+          "task": "Mailwatcher IMAP poll",
+          "service": "mailwatcher",
+          "log": "docker compose logs mailwatcher | grep poll_completed"
+        },
+        {
+          "time": "Every hour",
+          "task": "Follow-up sweep (missed ETA safety net)",
+          "celery_task": "process_due_followups"
+        },
+        {
+          "time": "Every hour",
+          "task": "Disk usage metric refresh",
+          "celery_task": "compute_disk_usage"
+        },
+        {
+          "time": "Every Sunday 04:00",
+          "task": "Broker URL health check",
+          "celery_task": "check_broker_opt_out_urls"
+        },
+        {
+          "time": "Every Sunday 06:00",
+          "task": "n8n broker discovery run",
+          "service": "n8n"
+        }
+      ]
+    },
+    "daily_check": {
+      "description": "Optional 2-minute daily glance. Not required if system health notifications are working.",
+      "steps": [
+        "Open dashboard \u2014 check notification bell for action_required items",
+        "Glance at household exposure scores \u2014 any unexpected increases?",
+        "Check System Health page \u2014 all services green?"
+      ]
+    }
+  },
+  "maintenance_schedule": {
+    "weekly": {
+      "estimated_time": "10 minutes",
+      "tasks": [
+        {
+          "task": "Verify backup completed successfully",
+          "command": "ls -lah /var/backups/opendataremoval/ | tail -5",
+          "expected": "At least one backup file with today's or yesterday's date",
+          "if_missing": "Run scripts/backup.sh manually, check cron: crontab -l | grep backup"
+        },
+        {
+          "task": "Check for failed removal requests",
+          "method": "Dashboard \u2192 Request Tracker \u2192 'Action Required' tab",
+          "action": "Review and manually intervene on any requires_manual requests"
+        },
+        {
+          "task": "Review system error logs",
+          "command": "docker compose logs --since=7d api worker mailwatcher | grep -i error | tail -20",
+          "expected": "No repeated errors from the same service"
+        },
+        {
+          "task": "Confirm n8n discovery ran",
+          "command": "docker compose logs --since=7d n8n | grep -i 'broker_registry_upsert\\|discovery' | tail -5",
+          "expected": "At least one successful discovery run in the past 7 days"
+        },
+        {
+          "task": "Check disk usage",
+          "command": "curl -s http://localhost:8000/api/system/health | python3 -c \"import sys,json; h=json.load(sys.stdin); [print(k,v) for k,v in h['data']['disk_usage'].items()]\"",
+          "expected": "No volume above 80% capacity"
+        }
+      ]
+    },
+    "monthly": {
+      "estimated_time": "20 minutes",
+      "tasks": [
+        {
+          "task": "Test backup restore (dry run)",
+          "steps": [
+            "Decrypt latest backup: gpg --decrypt ~/opendataremoval-secrets-backup.gpg | tar tz | head -20",
+            "Verify DB backup: gpg --decrypt backup.gpg | tar xz -C /tmp/test_restore --wildcards '*/opendataremoval_db.pgdump'",
+            "Check pgdump validity: pg_restore --list /tmp/test_restore/*/opendataremoval_db.pgdump | head -10",
+            "Clean up: rm -rf /tmp/test_restore"
+          ]
+        },
+        {
+          "task": "Review broker registry health",
+          "method": "Dashboard \u2192 Broker Registry \u2192 filter by captcha_required=true and is_active=false",
+          "action": "Research whether deactivated brokers have new opt-out mechanisms. Update playbooks for flagged brokers."
+        },
+        {
+          "task": "Review re-listing patterns",
+          "method": "Dashboard \u2192 Reports \u2192 Re-listings tab",
+          "action": "Identify brokers with high re-listing frequency. Consider more aggressive follow-up interval for those brokers."
+        },
+        {
+          "task": "Audit unclassified emails",
+          "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT from_address, subject, classified_at FROM mail.inbound_messages m JOIN mail.message_classifications mc ON m.id=mc.message_id WHERE mc.classification='unclassified' ORDER BY classified_at DESC LIMIT 20;\"",
+          "action": "Review patterns in unclassified emails \u2014 add new regex patterns to patterns.yml if a broker response format is not being caught"
+        },
+        {
+          "task": "Review screenshot storage usage",
+          "command": "du -sh /var/lib/docker/volumes/opendataremoval_screenshots/_data/",
+          "action": "If above 1 GB, consider reducing SCREENSHOT_RETENTION_DAYS in .env"
+        },
+        {
+          "task": "Update Docker images",
+          "steps": [
+            "docker compose pull",
+            "docker compose up -d",
+            "curl -s http://localhost:8000/api/system/health | python3 -m json.tool"
+          ]
+        }
+      ]
+    },
+    "quarterly": {
+      "estimated_time": "30-45 minutes",
+      "tasks": [
+        {
+          "task": "Secret rotation review",
+          "steps": [
+            "Review secrets inventory from DOC-12",
+            "Rotate JWT_SECRET (low complexity, all users re-login)",
+            "Rotate REDIS_PASSWORD (low complexity)",
+            "Consider rotating N8N_WEBHOOK_SECRET if n8n was exposed",
+            "Rotate DB_ENCRYPTION_KEY only if there is reason to believe it was compromised \u2014 high complexity"
+          ],
+          "reference": "DOC-12 rotation_procedures for exact commands per secret"
+        },
+        {
+          "task": "Python dependency audit",
+          "command": "docker compose run --rm api pip list --outdated",
+          "action": "Review outdated packages. Update requirements.txt, rebuild image, test.",
+          "priority_packages": [
+            "fastapi",
+            "playwright",
+            "sqlalchemy",
+            "celery",
+            "cryptography"
+          ]
+        },
+        {
+          "task": "Node dependency audit",
+          "command": "docker compose run --rm frontend npm audit",
+          "action": "Fix critical/high severity vulnerabilities. Run npm update, rebuild frontend image."
+        },
+        {
+          "task": "n8n workflow review",
+          "steps": [
+            "Access n8n UI at :5678",
+            "Check execution history for failed workflow runs",
+            "Verify discovery source URLs are still valid",
+            "Export updated workflow JSON and commit to workflows/ directory"
+          ]
+        },
+        {
+          "task": "Security verification checklist",
+          "reference": "Run all 12 checks from DOC-12 security_verification_checklist",
+          "command": "Paste and run each check command from DOC-12"
+        },
+        {
+          "task": "Review and prune old profiles",
+          "method": "Dashboard \u2192 Settings \u2192 Profiles",
+          "action": "Remove profiles for household members no longer using the system. Data will be archived before deletion."
+        }
+      ]
+    }
+  },
+  "upgrade_procedures": {
+    "docker_image_upgrades": {
+      "description": "Standard upgrade path for all OpenDataRemoval Docker images",
+      "frequency": "Monthly or when security advisories affect base images",
+      "steps": [
+        {
+          "step": 1,
+          "action": "Take a backup before any upgrade",
+          "command": "cd /home/{deploy_user}/opendataremoval && ./scripts/backup.sh"
+        },
+        {
+          "step": 2,
+          "action": "Pull latest images",
+          "command": "docker compose pull"
+        },
+        {
+          "step": 3,
+          "action": "Check if DB migrations are needed (only required when api image changes)",
+          "command": "docker compose run --rm api alembic current",
+          "note": "If output shows 'head' already, no migration needed. If behind, see migration_guide below."
+        },
+        {
+          "step": 4,
+          "action": "Apply migrations if needed",
+          "command": "docker compose run --rm api alembic upgrade head"
+        },
+        {
+          "step": 5,
+          "action": "Recreate containers with new images",
+          "command": "docker compose up -d --force-recreate"
+        },
+        {
+          "step": 6,
+          "action": "Verify health",
+          "command": "sleep 15 && curl -s http://localhost:8000/api/system/health | python3 -c \"import sys,json; d=json.load(sys.stdin); print('STATUS:', d['data']['status'])\"",
+          "expected": "STATUS: healthy"
+        },
+        {
+          "step": 7,
+          "action": "Verify frontend loads and shows correct version",
+          "method": "Open dashboard, check browser console for errors"
+        }
+      ],
+      "rollback": {
+        "description": "If upgrade causes issues, roll back to previous image tags",
+        "steps": [
+          "Pin specific image versions in docker-compose.yml (e.g. postgres:15.6-alpine instead of postgres:15-alpine)",
+          "docker compose up -d --force-recreate",
+          "If DB migration was applied: docker compose run --rm api alembic downgrade -1"
+        ]
+      }
+    },
+    "alembic_migration_guide": {
+      "description": "How to create and apply database schema migrations when the data model changes",
+      "check_current_version": "docker compose run --rm api alembic current",
+      "check_pending": "docker compose run --rm api alembic history --indicate-current",
+      "apply_migrations": "docker compose run --rm api alembic upgrade head",
+      "rollback_one": "docker compose run --rm api alembic downgrade -1",
+      "rollback_to_base": "docker compose run --rm api alembic downgrade base",
+      "create_new_migration": {
+        "auto_generate": "docker compose run --rm api alembic revision --autogenerate -m 'description_of_change'",
+        "manual": "docker compose run --rm api alembic revision -m 'description_of_change'",
+        "location": "Generated in migrations/versions/ \u2014 review before applying",
+        "warning": "Always review auto-generated migrations \u2014 autogenerate may miss encrypted column changes"
+      },
+      "migration_with_backup": {
+        "description": "Safe procedure for applying migrations in production",
+        "steps": [
+          "1. Take full backup: ./scripts/backup.sh",
+          "2. docker compose stop api worker beat playwright mailwatcher",
+          "3. docker compose run --rm api alembic upgrade head",
+          "4. docker compose start api worker beat playwright mailwatcher",
+          "5. Verify: curl -s http://localhost:8000/api/system/health"
+        ]
+      }
+    },
+    "python_dependency_updates": {
+      "steps": [
+        "1. docker compose run --rm api pip list --outdated > /tmp/outdated.txt && cat /tmp/outdated.txt",
+        "2. Update specific packages in api/requirements.txt, mailwatcher/requirements.txt, or playwright/requirements.txt",
+        "3. Rebuild affected images: docker compose build api (or mailwatcher/playwright)",
+        "4. docker compose up -d",
+        "5. Run test suite: cd /home/{deploy_user}/opendataremoval && pytest tests/unit/ -v",
+        "6. Check health"
+      ],
+      "caution": "Playwright version in playwright/requirements.txt must match the Chromium version installed in the Dockerfile. Update both together."
+    },
+    "n8n_upgrade": {
+      "steps": [
+        "1. Backup n8n workflows: docker compose exec n8n n8n export:workflow --all --output=/home/node/.n8n/workflows/",
+        "2. docker compose pull n8n",
+        "3. docker compose up -d n8n",
+        "4. Verify n8n UI loads at :5678",
+        "5. Verify workflows are present and active"
+      ],
+      "note": "n8n workflow format occasionally changes between major versions. Check n8n release notes before pulling 'latest' across major versions."
+    },
+    "playbook_updates": {
+      "description": "Updating broker automation playbooks when broker sites change their opt-out flow",
+      "steps": [
+        "1. Identify the changed broker from dashboard action items or failed scan notifications",
+        "2. Edit playbooks/brokers/{canonical_domain}.json",
+        "3. Increment playbook_version field",
+        "4. Validate: python3 -c \"import json, jsonschema; jsonschema.validate(json.load(open('playbooks/brokers/{domain}.json')), json.load(open('playbooks/schema.json'))); print('Valid')\"",
+        "5. Import via seed script: docker compose run --rm api python scripts/seed_brokers.py --domain {canonical_domain}",
+        "6. Test with dry run: POST /api/scans {broker_id, profile_id, dry_run: true} from dashboard",
+        "7. Review dry run screenshots",
+        "8. If satisfied, trigger live scan for this broker"
+      ]
+    }
+  },
+  "troubleshooting": {
+    "symptom_index": {
+      "description": "Find your symptom, follow the diagnosis link to the component section",
+      "symptoms": [
+        {
+          "symptom": "Scans not running at scheduled time",
+          "diagnosis": "symptom_scans_not_running"
+        },
+        {
+          "symptom": "Scan running but all results are error or inconclusive",
+          "diagnosis": "symptom_scan_errors"
+        },
+        {
+          "symptom": "CAPTCHA blocked appearing on many brokers",
+          "diagnosis": "symptom_captcha_flood"
+        },
+        {
+          "symptom": "Removal requests stuck at pending_confirmation for weeks",
+          "diagnosis": "symptom_requests_stuck"
+        },
+        {
+          "symptom": "Emails not being sent to brokers",
+          "diagnosis": "symptom_smtp_failure"
+        },
+        {
+          "symptom": "Broker response emails not being processed",
+          "diagnosis": "symptom_imap_failure"
+        },
+        {
+          "symptom": "Dashboard not loading or showing 502/503",
+          "diagnosis": "symptom_dashboard_down"
+        },
+        {
+          "symptom": "Notifications not appearing in real time",
+          "diagnosis": "symptom_websocket_broken"
+        },
+        {
+          "symptom": "n8n broker discovery not finding new brokers",
+          "diagnosis": "symptom_n8n_failure"
+        },
+        {
+          "symptom": "Database connection errors in logs",
+          "diagnosis": "symptom_db_issues"
+        },
+        {
+          "symptom": "Disk space warning in System Health",
+          "diagnosis": "symptom_disk_full"
+        },
+        {
+          "symptom": "Worker queue depth growing without processing",
+          "diagnosis": "symptom_worker_backlog"
+        },
+        {
+          "symptom": "Profile PII not decrypting (500 errors on profile endpoints)",
+          "diagnosis": "symptom_encryption_key"
+        },
+        {
+          "symptom": "n8n webhook returning 401",
+          "diagnosis": "symptom_webhook_auth"
+        }
+      ]
+    },
+    "diagnoses": {
+      "symptom_scans_not_running": {
+        "title": "Scans not running at scheduled time",
+        "quick_check": "curl -s http://localhost:8000/api/system/health | python3 -c \"import sys,json; d=json.load(sys.stdin)['data']; print('worker:', d['services']['worker'], 'last_scan:', d['last_scan_completed_at'])\"",
+        "steps": [
+          {
+            "check": "Is Celery Beat running?",
+            "command": "docker compose ps beat",
+            "if_down": "docker compose start beat"
+          },
+          {
+            "check": "Is the worker running?",
+            "command": "docker compose ps worker",
+            "if_down": "docker compose start worker"
+          },
+          {
+            "check": "Is Redis healthy?",
+            "command": "docker compose exec redis redis-cli -a ${REDIS_PASSWORD} ping",
+            "expected": "PONG",
+            "if_fail": "docker compose restart redis && sleep 5 && docker compose restart worker beat"
+          },
+          {
+            "check": "Check Beat schedule log",
+            "command": "docker compose logs beat --tail=50 | grep -i 'dispatch_daily_scan\\|error'",
+            "expected": "Should show dispatch_daily_scan triggered at 02:00"
+          },
+          {
+            "check": "Check worker is consuming tasks",
+            "command": "docker compose logs worker --tail=50 | grep -i 'received\\|executing\\|error'",
+            "if_silent": "Worker may have crashed \u2014 restart: docker compose restart worker"
+          },
+          {
+            "check": "Manually trigger scan to test",
+            "command": "Dashboard \u2192 Settings \u2192 Trigger manual scan",
+            "if_works": "Scheduled scan may have been missed during downtime. Will resume on next 02:00 cycle.",
+            "if_fails": "Continue to worker_backlog diagnosis"
+          }
+        ]
+      },
+      "symptom_scan_errors": {
+        "title": "Scan results mostly error or inconclusive",
+        "steps": [
+          {
+            "check": "Is the Playwright service healthy?",
+            "command": "docker compose exec api curl -s http://playwright:8001/health",
+            "expected": "{ status: healthy, pool_available: N }",
+            "if_fail": "docker compose restart playwright && sleep 10 && docker compose exec api curl -s http://playwright:8001/health"
+          },
+          {
+            "check": "Check Playwright logs for Chromium errors",
+            "command": "docker compose logs playwright --tail=100 | grep -i 'error\\|chromium\\|crash'",
+            "common_cause": "Shared memory exhaustion \u2014 check shm_size: 256mb is set in docker-compose.yml"
+          },
+          {
+            "check": "Is the host IP being blocked? (rate limiting)",
+            "command": "docker compose logs playwright --tail=100 | grep -i 'rate_limited\\|429\\|too many'",
+            "if_yes": "Increase PLAYWRIGHT_MIN_DELAY_MS and PLAYWRIGHT_MAX_DELAY_MS in .env. Consider enabling PLAYWRIGHT_PROXY_URL."
+          },
+          {
+            "check": "Are playbooks outdated? (broker site changed)",
+            "method": "Check scan_results table for which specific brokers are erroring",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT b.canonical_domain, sr.result_status, sr.error_message FROM scanning.scan_results sr JOIN registry.brokers b ON sr.broker_id=b.id WHERE sr.result_status='error' AND sr.scanned_at > now() - interval '1 day' ORDER BY sr.scanned_at DESC LIMIT 20;\"",
+            "action": "Update playbooks for repeatedly failing brokers \u2014 see upgrade_procedures.playbook_updates"
+          }
+        ]
+      },
+      "symptom_captcha_flood": {
+        "title": "CAPTCHA blocked appearing on many brokers",
+        "likely_cause": "IP address flagged by broker network. Common after scanning many brokers from same IP in short window.",
+        "steps": [
+          {
+            "action": "Check how many brokers are newly CAPTCHA-flagged",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT COUNT(*) FROM registry.brokers WHERE captcha_required=true AND updated_at > now() - interval '2 days';\""
+          },
+          {
+            "action": "Increase scan delays temporarily",
+            "steps": [
+              "Update PLAYWRIGHT_MIN_DELAY_MS=5000 and PLAYWRIGHT_MAX_DELAY_MS=10000 in .env",
+              "docker compose restart worker playwright"
+            ]
+          },
+          {
+            "action": "Enable proxy rotation (long-term fix)",
+            "steps": [
+              "Set PLAYWRIGHT_PROXY_URL in .env to a residential proxy or Tor endpoint",
+              "docker compose restart worker playwright",
+              "Verify: docker compose logs playwright | grep proxy"
+            ]
+          },
+          {
+            "action": "Manually clear captcha_required for brokers you know to be resolvable",
+            "command": "Dashboard \u2192 Broker Registry \u2192 find broker \u2192 Edit \u2192 uncheck captcha_required"
+          }
+        ]
+      },
+      "symptom_requests_stuck": {
+        "title": "Removal requests stuck at pending_confirmation",
+        "steps": [
+          {
+            "check": "How long have requests been pending?",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT b.display_name, r.status, r.submitted_at, r.next_action_at, r.followup_count FROM requests.removal_requests r JOIN registry.brokers b ON r.broker_id=b.id WHERE r.status='pending_confirmation' ORDER BY r.submitted_at ASC LIMIT 20;\""
+          },
+          {
+            "check": "Has Mailwatcher processed any emails from these brokers?",
+            "command": "docker compose logs mailwatcher --since=7d | grep -i 'classification_result\\|confirmed_removal'",
+            "if_silent": "Mailwatcher may not be running or IMAP credentials expired"
+          },
+          {
+            "check": "Are follow-ups being dispatched?",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT COUNT(*) FROM requests.followups WHERE sent_at > now() - interval '7 days';\"",
+            "if_zero_and_requests_old": "process_due_followups task may not be running \u2014 check beat logs"
+          },
+          {
+            "action": "Manually trigger follow-up for stuck requests via dashboard",
+            "method": "Request Tracker \u2192 expand row \u2192 Resubmit button"
+          },
+          {
+            "action": "Check broker contact email is correct",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT canonical_domain, contact_email, removal_method FROM registry.brokers WHERE id IN (SELECT broker_id FROM requests.removal_requests WHERE status='pending_confirmation');\"",
+            "note": "Null contact_email for email-method brokers will cause silent failures"
+          }
+        ]
+      },
+      "symptom_smtp_failure": {
+        "title": "Emails not being sent to brokers",
+        "steps": [
+          {
+            "check": "Are removal emails appearing in audit log?",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT event_type, outcome, detail, created_at FROM audit.audit_log WHERE event_type='removal_email_sent' ORDER BY created_at DESC LIMIT 5;\""
+          },
+          {
+            "check": "Test SMTP credentials directly",
+            "command": "docker compose run --rm -e SMTP_HOST -e SMTP_PORT -e SMTP_USER -e SMTP_PASSWORD mailwatcher python3 -c \"import smtplib; s=smtplib.SMTP_SSL('$SMTP_HOST',$SMTP_PORT); s.login('$SMTP_USER','$SMTP_PASSWORD'); print('SMTP OK'); s.quit()\"",
+            "if_fail": "Mailgun credentials may have expired or changed. Rotate via Mailgun dashboard and update .env."
+          },
+          {
+            "check": "Check Mailgun sending domain DNS",
+            "method": "Login to Mailgun dashboard \u2192 Sending \u2192 Domains \u2192 verify DNS records are valid and verified"
+          },
+          {
+            "check": "Check worker logs for SMTP exceptions",
+            "command": "docker compose logs worker --since=24h | grep -i 'smtp\\|email\\|error'"
+          }
+        ]
+      },
+      "symptom_imap_failure": {
+        "title": "Broker response emails not being processed",
+        "steps": [
+          {
+            "check": "Check Mailwatcher is polling",
+            "command": "docker compose logs mailwatcher --tail=50 | grep -i 'poll_started\\|poll_completed\\|error\\|reconnect'",
+            "expected": "poll_completed entries every ~15 minutes"
+          },
+          {
+            "check": "Test IMAP connection",
+            "command": "docker compose exec mailwatcher python3 -c \"import imaplib; m=imaplib.IMAP4_SSL('$IMAP_HOST'); m.login('$IMAP_USER','$IMAP_PASSWORD'); print('IMAP OK:', m.list()); m.logout()\"",
+            "if_fail": "IMAP credentials expired \u2014 rotate in Mailgun and update .env, restart mailwatcher"
+          },
+          {
+            "check": "Check IMAP Processed folder exists",
+            "command": "docker compose exec mailwatcher python3 -c \"import imaplib; m=imaplib.IMAP4_SSL('$IMAP_HOST'); m.login('$IMAP_USER','$IMAP_PASSWORD'); print(m.list())\"",
+            "action": "If Processed folder missing, Mailwatcher will create it on next startup: docker compose restart mailwatcher"
+          },
+          {
+            "check": "Are emails being classified as unclassified when they should not be?",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT m.from_address, m.subject, mc.classification, mc.matched_patterns FROM mail.inbound_messages m JOIN mail.message_classifications mc ON m.id=mc.message_id WHERE mc.classification='unclassified' ORDER BY m.received_at DESC LIMIT 10;\"",
+            "action": "Review patterns and add new regex entries to mailwatcher/patterns.yml"
+          }
+        ]
+      },
+      "symptom_dashboard_down": {
+        "title": "Dashboard not loading or returning 502/503",
+        "steps": [
+          {
+            "check": "Is frontend container running?",
+            "command": "docker compose ps frontend",
+            "if_down": "docker compose start frontend"
+          },
+          {
+            "check": "Is API container running?",
+            "command": "docker compose ps api",
+            "if_down": "docker compose start api"
+          },
+          {
+            "check": "Is DB healthy?",
+            "command": "docker compose exec db pg_isready -U opendataremoval",
+            "expected": "opendataremoval:5432 - accepting connections"
+          },
+          {
+            "check": "Check API startup logs",
+            "command": "docker compose logs api --tail=50",
+            "common_issues": [
+              "Alembic migration failed \u2014 run: docker compose run --rm api alembic upgrade head",
+              "DB_ENCRYPTION_KEY missing or invalid",
+              "DATABASE_URL wrong after POSTGRES_PASSWORD rotation"
+            ]
+          },
+          {
+            "check": "Check Nginx config",
+            "command": "docker compose exec frontend nginx -t",
+            "if_fail": "nginx.conf syntax error \u2014 check frontend/nginx.conf"
+          }
+        ]
+      },
+      "symptom_websocket_broken": {
+        "title": "Notifications not appearing in real time (WebSocket)",
+        "steps": [
+          {
+            "check": "Check Nginx WebSocket proxy config",
+            "command": "grep -A5 'location /api/ws' frontend/nginx.conf",
+            "expected": "Upgrade and Connection headers present"
+          },
+          {
+            "check": "Check browser console for WebSocket errors",
+            "method": "Open browser DevTools \u2192 Console \u2192 look for WebSocket errors"
+          },
+          {
+            "check": "Is Redis pub/sub working?",
+            "command": "docker compose exec redis redis-cli -a $REDIS_PASSWORD SUBSCRIBE opendataremoval:notifications:test &\ndocker compose exec redis redis-cli -a $REDIS_PASSWORD PUBLISH opendataremoval:notifications:test 'ping'\n# Should see 'ping' in subscriber",
+            "if_fail": "Redis pub/sub broken \u2014 docker compose restart redis api"
+          }
+        ]
+      },
+      "symptom_n8n_failure": {
+        "title": "n8n broker discovery not running or finding new brokers",
+        "steps": [
+          {
+            "check": "Is n8n container running?",
+            "command": "docker compose ps n8n",
+            "if_down": "docker compose start n8n"
+          },
+          {
+            "check": "Check n8n workflow execution history",
+            "method": "Login to n8n UI at :5678 \u2192 Workflows \u2192 Broker Discovery Orchestrator \u2192 Executions tab"
+          },
+          {
+            "check": "Is WEBHOOK_URL correct?",
+            "command": "docker compose exec n8n env | grep WEBHOOK_URL",
+            "expected": "WEBHOOK_URL=http://api:8000"
+          },
+          {
+            "check": "Test webhook manually",
+            "command": "See DOC-10 setup_checklist step 6 \u2014 manually trigger with dry_run=true"
+          },
+          {
+            "check": "Check GitHub rate limit",
+            "command": "curl -s https://api.github.com/rate_limit | python3 -m json.tool | grep remaining",
+            "note": "Unauthenticated GitHub API is limited to 60 requests/hour. n8n workflows only fetch raw content, not the API."
+          }
+        ]
+      },
+      "symptom_db_issues": {
+        "title": "Database connection errors",
+        "steps": [
+          {
+            "check": "Is PostgreSQL running?",
+            "command": "docker compose ps db",
+            "if_down": "docker compose start db && sleep 10"
+          },
+          {
+            "check": "Is DB accepting connections?",
+            "command": "docker compose exec db pg_isready -U opendataremoval"
+          },
+          {
+            "check": "Check DB logs for errors",
+            "command": "docker compose logs db --tail=50 | grep -i 'error\\|fatal\\|panic'"
+          },
+          {
+            "check": "Connection pool exhausted?",
+            "command": "docker compose exec db psql -U opendataremoval -c 'SELECT count(*) FROM pg_stat_activity;'",
+            "if_high": "Restart api and worker to clear hung connections: docker compose restart api worker"
+          },
+          {
+            "check": "Disk full?",
+            "command": "df -h /var/lib/docker/volumes/opendataremoval_db_data/",
+            "if_full": "See symptom_disk_full"
+          }
+        ]
+      },
+      "symptom_disk_full": {
+        "title": "Disk space warning or containers failing due to full disk",
+        "steps": [
+          {
+            "check": "Which volume is largest?",
+            "command": "du -sh /var/lib/docker/volumes/opendataremoval_*/"
+          },
+          {
+            "check": "Screenshots taking too much space?",
+            "command": "du -sh /var/lib/docker/volumes/opendataremoval_screenshots/_data/",
+            "action": "Reduce SCREENSHOT_RETENTION_DAYS in .env and run purge: docker compose exec worker celery -A workers.celery_app call workers.tasks.maintenance.purge_expired_screenshots"
+          },
+          {
+            "check": "DB growing unexpectedly?",
+            "command": "docker compose exec db psql -U opendataremoval -c \"SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size FROM pg_tables WHERE schemaname IN ('scanning','audit','reporting') ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC LIMIT 10;\"",
+            "action": "Audit log and scan_results accumulate over time \u2014 consider archiving old scan data"
+          },
+          {
+            "check": "Old backups consuming space?",
+            "command": "du -sh /var/backups/opendataremoval/*",
+            "action": "Remove backups older than 30 days: find /var/backups/opendataremoval -name '*.gpg' -mtime +30 -delete"
+          }
+        ]
+      },
+      "symptom_worker_backlog": {
+        "title": "Worker queue growing without being processed",
+        "steps": [
+          {
+            "check": "Check queue depth",
+            "command": "docker compose exec redis redis-cli -a $REDIS_PASSWORD LLEN celery",
+            "threshold": "Normal: <50. Warning: 50-200. Critical: >200"
+          },
+          {
+            "check": "Are workers consuming?",
+            "command": "docker compose exec worker celery -A workers.celery_app inspect active"
+          },
+          {
+            "check": "Any tasks stuck/reserved?",
+            "command": "docker compose exec worker celery -A workers.celery_app inspect reserved"
+          },
+          {
+            "check": "Worker crashed?",
+            "command": "docker compose logs worker --tail=100 | grep -i 'killed\\|oom\\|signal\\|error'",
+            "if_oom": "Worker killed by OOM \u2014 reduce CELERY_WORKER_CONCURRENCY to 1 in .env and restart"
+          },
+          {
+            "action": "Purge stuck tasks (only if queue is truly stuck and tasks are safe to discard)",
+            "command": "docker compose exec worker celery -A workers.celery_app purge",
+            "warning": "This discards all queued tasks. Scans and removals will retry at next scheduled run."
+          }
+        ]
+      },
+      "symptom_encryption_key": {
+        "title": "PII not decrypting \u2014 500 errors on profile endpoints",
+        "likely_cause": "DB_ENCRYPTION_KEY in .env does not match the key used to encrypt the data",
+        "steps": [
+          {
+            "check": "Verify key is set in .env",
+            "command": "grep DB_ENCRYPTION_KEY .env | wc -c",
+            "expected": ">30 characters"
+          },
+          {
+            "check": "Test decryption directly",
+            "command": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT pgp_sym_decrypt(display_name::bytea, current_setting('app.encryption_key')) FROM identity.profiles LIMIT 1;\"",
+            "if_error": "Key mismatch \u2014 restore .env from GPG backup: gpg --decrypt ~/opendataremoval-secrets-backup.gpg | grep DB_ENCRYPTION_KEY"
+          },
+          {
+            "check": "Was .env file replaced or reset?",
+            "action": "Restore DB_ENCRYPTION_KEY from GPG backup. The data cannot be recovered without the original key."
+          },
+          {
+            "warning": "If original key is permanently lost, all PII is unrecoverable. Profiles must be deleted and re-entered."
+          }
+        ]
+      },
+      "symptom_webhook_auth": {
+        "title": "n8n webhook returning 401",
+        "steps": [
+          {
+            "check": "N8N_WEBHOOK_SECRET matches in both .env and n8n environment",
+            "command": "grep N8N_WEBHOOK_SECRET .env && docker compose exec n8n env | grep N8N_WEBHOOK_SECRET"
+          },
+          {
+            "if_mismatch": "Update N8N_WEBHOOK_SECRET in .env to match, or restart n8n to pick up the current .env value: docker compose restart api n8n"
+          },
+          {
+            "check": "n8n Code node computing HMAC correctly",
+            "method": "In n8n UI, open Compute HMAC Signature node, click Execute node with test data, verify signature format is sha256={hex}"
+          }
+        ]
+      }
+    }
+  },
+  "common_operational_tasks": {
+    "add_new_household_member": {
+      "steps": [
+        "Dashboard \u2192 Settings \u2192 Profiles \u2192 Add Profile",
+        "Enter full legal name, date of birth",
+        "Add all known addresses (current and previous 2 years)",
+        "Add all phone numbers (current and recent)",
+        "Add all email addresses (current and any used in past 5 years)",
+        "Add any known aliases or maiden names",
+        "Save \u2014 system will automatically schedule a full scan for the new profile within 24 hours"
+      ]
+    },
+    "deactivate_member_without_deleting": {
+      "steps": [
+        "Dashboard \u2192 Settings \u2192 Profiles \u2192 select member \u2192 Edit",
+        "Toggle 'Pause automation' to ON",
+        "Save \u2014 all scans and removal actions suspended, data retained"
+      ]
+    },
+    "manually_trigger_removal_for_specific_broker": {
+      "steps": [
+        "Dashboard \u2192 Broker Registry \u2192 search for broker",
+        "Click broker \u2192 View requests for this broker",
+        "If no active request: Dashboard \u2192 Scans \u2192 Trigger manual scan for specific profile + broker",
+        "If exposure found: removal request will be auto-created",
+        "If request already exists and is stuck: Request Tracker \u2192 find request \u2192 Resubmit"
+      ]
+    },
+    "import_new_broker_manually": {
+      "steps": [
+        "Create playbooks/brokers/{canonical_domain}.json following DOC-6 schema",
+        "Validate: python3 -c \"import json,jsonschema; jsonschema.validate(json.load(open('playbooks/brokers/{domain}.json')), json.load(open('playbooks/schema.json')))\"",
+        "Import: docker compose run --rm api python scripts/seed_brokers.py --domain {canonical_domain}",
+        "Verify in Dashboard \u2192 Broker Registry"
+      ]
+    },
+    "pause_all_automation": {
+      "description": "Stop all scanning and removal activity temporarily (e.g. during maintenance)",
+      "steps": [
+        "docker compose stop worker beat",
+        "Note: Mailwatcher continues to classify incoming emails (harmless)",
+        "Note: n8n discovery continues (harmless)",
+        "To resume: docker compose start worker beat"
+      ]
+    },
+    "view_what_was_sent_to_a_broker": {
+      "steps": [
+        "Dashboard \u2192 Reports \u2192 Audit Log",
+        "Filter by event_type=removal_email_sent or removal_submitted",
+        "Filter by broker name",
+        "Click row to see detail JSON including email subject, form fields submitted"
+      ]
+    }
+  },
+  "log_locations": {
+    "all_services": "docker compose logs -f --tail=200",
+    "api_errors": "docker compose logs api | grep -i error",
+    "worker_task_history": "docker compose logs worker | grep -E 'Task|Received|Succeeded|Failed'",
+    "scan_results": "docker compose logs worker | grep 'scan_broker'",
+    "mailwatcher_classifications": "docker compose logs mailwatcher | grep 'classification_result'",
+    "n8n_executions": "n8n UI at :5678 \u2192 Executions",
+    "audit_log_db": "docker compose exec db psql -U opendataremoval opendataremoval -c \"SELECT event_type, actor_type, outcome, created_at FROM audit.audit_log ORDER BY created_at DESC LIMIT 50;\""
+  }
+}

@@ -63,35 +63,34 @@ class TestAuthEndpoints:
     @patch('services.auth_service.AuthService.create_magic_link')
     def test_request_code_success(self, mock_create):
         """Test successful code request."""
-        from schemas.auth import CodeRequest
+        from schemas.auth import RegisterRequest
 
         mock_create.return_value = "test_token"
-        payload = CodeRequest(email="user@example.com")
+        payload = RegisterRequest(username="testuser", email="user@example.com", password="password123")
 
         # Verify schema validation works
         assert payload.email == "user@example.com"
 
     def test_code_request_invalid_email(self):
         """Test code request with invalid email."""
-        from schemas.auth import CodeRequest
+        from schemas.auth import RegisterRequest
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            CodeRequest(email="not-an-email")
+            RegisterRequest(username="testuser", email="not-an-email", password="password123")
 
     def test_verify_code_schema(self):
-        """Test verify code schema validation."""
-        from schemas.auth import CodeVerify
+        """Test login schema validation."""
+        from schemas.auth import LoginRequest
 
-        payload = CodeVerify(email="user@example.com", code="123456")
-        assert payload.email == "user@example.com"
-        assert payload.code == "123456"
-        assert len(payload.code) == 6
+        payload = LoginRequest(username="testuser", password="password123")
+        assert payload.username == "testuser"
+        assert payload.password == "password123"
 
     def test_verify_code_invalid_format(self):
-        """Test verify code with invalid code format."""
-        from schemas.auth import CodeVerify
+        """Test login with missing username."""
+        from schemas.auth import LoginRequest
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            CodeVerify(email="user@example.com", code="123")  # too short
+            LoginRequest(username="", password="password123")  # empty username

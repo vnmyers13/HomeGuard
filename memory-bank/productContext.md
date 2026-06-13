@@ -1,6 +1,6 @@
 # Product Context
 
-## Why HomeGuard Exists
+## Why OpenDataRemoval Exists
 Data brokers collect, aggregate, and sell personal information (names, addresses, phone numbers, emails) about everyday people. Finding and removing this data manually is time-consuming, technically challenging, and unsustainable - brokers re-list data frequently.
 
 ## Problems It Solves

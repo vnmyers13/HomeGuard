@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CCPA Data Deletion Request</title>
+  <style>
+    body { font-family: 'Times New Roman', Times, serif; line-height: 1.8; color: #000; max-width: 650px; margin: 0 auto; padding: 40px; }
+    .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 30px; }
+    .section { margin: 25px 0; }
+    .section-title { font-weight: bold; text-decoration: underline; margin-bottom: 10px; }
+    .info-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    .info-table td { padding: 8px 0; vertical-align: top; }
+    .label { font-weight: bold; width: 180px; }
+    .legal-cite { font-style: italic; color: #333; margin: 10px 0; }
+    .signature { margin-top: 50px; }
+    .footer { margin-top: 40px; font-size: 11px; color: #666; border-top: 1px solid #ccc; padding-top: 15px; }
+    .envelope-marker { position: absolute; top: 20px; right: 20px; font-size: 12px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="envelope-marker">COURTESY COPY</div>
+
+  <div class="header">
+    <h1 style="margin: 0; font-size: 28px;">CALIFORNIA CONSUMER PRIVACY ACT</h1>
+    <h2 style="margin: 5px 0 0 0; font-size: 22px;">DATA DELETION REQUEST</h2>
+    <p style="margin: 5px 0 0 0; color: #666;">Pursuant to Cal. Civ. Code § 1798.100 et seq.</p>
+  </div>
+
+  <p><strong>Date:</strong> {{request_date}}</p>
+  <p><strong>Request ID:</strong> {{request_id}}</p>
+
+  <div class="section">
+    <p><strong>To:</strong></p>
+    <p>
+      {{broker_name}}<br>
+      {% if broker_address %}{{broker_address}}{% endif %}<br>
+      Privacy Officer / Legal Department<br>
+      Data Protection Compliance
+    </p>
+  </div>
+
+  <div class="section">
+    <p><strong>Re: Formal Request for Deletion of Personal Information under the California Consumer Privacy Act (CCPA)</strong></p>
+  </div>
+
+  <div class="section">
+    <p>Dear Sir or Madam,</p>
+
+    <p>I am writing to exercise my rights under the California Consumer Privacy Act ("CCPA"), Cal. Civ. Code § 1798.100 et seq., specifically the right to deletion of personal information as provided in Cal. Civ. Code § 1798.105.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">I. CONSUMER IDENTIFICATION</div>
+    <table class="info-table">
+      <tr>
+        <td class="label">Full Legal Name:</td>
+        <td>{{profile_full_name}}</td>
+      </tr>
+      {% if profile_address %}
+      <tr>
+        <td class="label">Current Address:</td>
+        <td>{{profile_address}}</td>
+      </tr>
+      {% endif %}
+      {% if profile_email %}
+      <tr>
+        <td class="label">Email Address:</td>
+        <td>{{profile_email}}</td>
+      </tr>
+      {% endif %}
+      {% if profile_phone %}
+      <tr>
+        <td class="label">Phone Number:</td>
+        <td>{{profile_phone}}</td>
+      </tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">II. PERSONAL INFORMATION LOCATED ON YOUR PLATFORM</div>
+    <p>The following personal information about me is currently accessible on your website and is being maintained without my consent:</p>
+    <p style="background-color: #f5f5f5; padding: 10px; border-left: 3px solid #000;">
+      <strong>URL:</strong> {{listing_url}}
+    </p>
+    <p>This page contains personal information including but not limited to my name, address, and other identifiers that constitute "personal information" as defined by Cal. Civ. Code § 1798.140(o).</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">III. LEGAL AUTHORITY</div>
+    <p>This request is made pursuant to the following provisions of the CCPA:</p>
+    <ul>
+      <li><strong>Cal. Civ. Code § 1798.105(a):</strong> "Upon receipt of a verifiable consumer request... a business that collects or maintains personal information about consumers shall delete the consumer's personal information..."</li>
+      <li><strong>Cal. Civ. Code § 1798.105(b):</strong> "A business that receives such a request shall delete, and direct its service providers to delete, the consumer's personal information..."</li>
+      <li><strong>Cal. Civ. Code § 1798.105(d):</strong> "A business shall not discriminate against a consumer because the consumer exercised any of their rights under this title."</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-title">IV. SPECIFIC REQUEST</div>
+    <p>I hereby demand that you:</p>
+    <ol>
+      <li><strong>DELETE</strong> all personal information about me that you have collected or maintained, including the data displayed at the URL specified above;</li>
+      <li><strong>DIRECT YOUR SERVICE PROVIDERS</strong> to delete all personal information about me;</li>
+      <li><strong>CONFIRM</strong> in writing that you have complied with this deletion request within 15 days of receipt;</li>
+      <li><strong>ENSURE</strong> that my personal information is not sold to any third parties, now or in the future.</li>
+    </ol>
+  </div>
+
+  <div class="section">
+    <div class="section-title">V. RESPONSE REQUIRED</div>
+    <p>Pursuant to Cal. Civ. Code § 1798.100, you are required to respond to this request within <strong>45 days</strong> of receipt. Your response must include:</p>
+    <ul>
+      <li>Confirmation that the personal information has been deleted; OR</li>
+      <li>An explanation of any personal information that cannot be deleted, along with the specific statutory exemption claimed;</li>
+      <li>If an extension is needed, notification within 45 days stating the reason and estimated completion time (not to exceed 90 days total per Cal. Civ. Code § 1798.130).</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-title">VI. PRESERVATION OF RIGHTS</div>
+    <p>I expressly reserve all rights to pursue any legal remedies available under the CCPA, including but not limited to:</p>
+    <ul>
+      <li><strong>Private Right of Action:</strong> Cal. Civ. Code § 1798.150 (for data breaches)</li>
+      <li><strong>Attorney General Enforcement:</strong> Cal. Civ. Code § 1798.155</li>
+      <li><strong>Injunctive Relief:</strong> Cal. Civ. Code § 1798.150(b)(5)</li>
+      <li><strong>Statutory Damages:</strong> Cal. Civ. Code § 1798.150(b)(3) (not less than $100 nor greater than $750 per consumer per incident)</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <p>This letter is written without prejudice to any other rights or remedies available under California law or otherwise, all of which are expressly reserved.</p>
+  </div>
+
+  <div class="signature">
+    <p>Govern yourself accordingly.</p>
+    <p>Sincerely,</p>
+    <br>
+    <p>
+      <strong>OpenDataRemoval Privacy Protection Services</strong><br>
+      On behalf of {{profile_full_name}}<br>
+    </p>
+  </div>
+
+  <div class="footer">
+    <p><strong>NOTICE:</strong> This is a legal document. Failure to respond within the statutory period may result in enforcement action by the California Attorney General or private litigation. Retain a copy for your records.</p>
+    <p><strong>Service:</strong> This letter may be served electronically or by certified mail per Cal. Civ. Code § 1013.</p>
+    <p style="text-align: center; margin-top: 20px;">*** END OF DOCUMENT ***</p>
+  </div>
+</body>
+</html>

@@ -1,9 +1,9 @@
 # System Patterns
 
 ## Architecture Overview
-HomeGuard follows a microservices architecture via Docker Compose with 9 services connected by two networks:
-- `homeguard_net` (internal): db, redis, beat only
-- `homeguard_egress` (bridge): api, worker, playwright, mailwatcher, n8n
+OpenDataRemoval follows a microservices architecture via Docker Compose with 9 services connected by two networks:
+- `opendataremoval_net` (internal): db, redis, beat only
+- `opendataremoval_egress` (bridge): api, worker, playwright, mailwatcher, n8n
 
 ## Key Design Patterns
 

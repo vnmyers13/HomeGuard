@@ -1,9 +1,10 @@
 /**
- * HomeGuard Frontend - Root App Component
+ * OpenDataRemoval Frontend - Root App Component
  *
  * Sprint 2: Authentication + protected routing.
+ * Sprint 4: Added Notifications page.
  * Public routes: /login, /register
- * Protected routes: / (dashboard wrapper around Overview), /profile, /household, /brokers, /scans
+ * Protected routes: / (dashboard wrapper around Overview), /profile, /household, /brokers, /scans, /notifications
  */
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
@@ -15,6 +16,7 @@ import Profile from './pages/Profile';
 import Household from './pages/Household';
 import Brokers from './pages/Brokers';
 import Scans from './pages/Scans';
+import Notifications from './pages/Notifications';
 import { useAuthStore } from './stores/authStore';
 
 // ----------------------
@@ -53,6 +55,7 @@ export default function App() {
           <Route path="household" element={<Household />} />
           <Route path="brokers" element={<Brokers />} />
           <Route path="scans" element={<Scans />} />
+          <Route path="notifications" element={<Notifications />} />
         </Route>
 
         {/* Fallback: redirect to dashboard */}

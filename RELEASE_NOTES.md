@@ -1,5 +1,77 @@
 # HomeGuard Release Notes
 
+## Version 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
+
+### Overview
+First production-ready release of HomeGuard (formerly OpenDataRemoval). This release fixes 8 critical bugs that prevented the platform from running reliably, adds the missing alerts API, resolves the project name transition from OpenDataRemoval to HomeGuard, and establishes a complete release pipeline with Gitea publishing and Docker image support.
+
+---
+
+### Bug Fixes
+
+#### Critical Fixes (Prevent Runtime Failures)
+- **Missing alerts router** - `api/routers/alerts.py` was referenced but did not exist, causing API startup crash. Created with list, detail, and acknowledge endpoints for security alert management.
+- **__init__.py import failures** - `api/workers/tasks/__init__.py` imported 10 non-existent symbols, crashing any module that imported from the tasks package. Fixed to reference actual function names.
+- **Circular import (scanning ↔ requests)** - `scanning.py` and `requests.py` imported from each other at module level, causing one module to receive `None`. Resolved with lazy imports inside function bodies.
+- **Undefined schedule_follow_up_check** - Function was defined but never imported due to circular dependency. Now properly imported in both scanning.py and requests.py.
+
+#### Celery Worker Fixes
+- **Nested asyncio.run()** - `execute_removal_request` and `followup_removal_request` called `asyncio.run()` inside an already-running event loop, causing `RuntimeError`. Restructured to use single async context.
+- **autodiscover_packages argument format** - Received tuples instead of flat string list, preventing task discovery. Fixed argument unpacking.
+- **Missing @celery_app.task decorators** - `check_broker_opt_out_urls` and `upsert_broker_from_discovery` in `registry.py` were plain functions, not registered as Celery tasks. Added decorators.
+
+#### Mailwatcher Fixes
+- **Wrong env var prefix** - Used `HOMEGUARD_*` instead of `MAILWATCHER_*`, causing config loading failures. Fixed all references.
+- **Non-static method** - `_build_config_dict` was an instance method but called without an instance. Made it a `@staticmethod`.
+
+### Improvements
+- **Project name** - Officially renamed from OpenDataRemoval to HomeGuard across API title, startup logs, and frontend package name
+- **Release pipeline** - Established Gitea publishing workflow with automated tag-based releases
+- **Release checklist** - Comprehensive 9-phase release process documented in `release_checklist.json`
+
+---
+
+## Version 0.3.0 - Sprint 3 Complete (2026-05-09)
+
+### Overview
+Sprint 3 delivers the Playwright executor microservice, Celery task integration, Mailwatcher email processing pipeline, n8n workflow orchestration, and a comprehensive test suite with 237 total tests (45 API + 151 Playwright unit + 41 E2E). The system can now execute end-to-end deletion scan campaigns: discovering profiles on data brokers, navigating deletion flows, handling CAPTCHAs and confirmations, and processing email responses.
+
+---
+
+### New Features
+
+#### Playwright Executor Service
+- **Browser Pool** - Anti-detection Chromium contexts with randomized UA (Chrome 65%, Safari 20%, Firefox 15%), viewport randomization, and `navigator.webdriver` patching
+- **Token Resolver** - SafeDict template engine with derived tokens (first_name/last_name from full_name, city/state/zip from address, dob_month/dob_year from DOB)
+- **16 Action Handlers** - navigate, fill_form, click, wait, screenshot, submit, select, hover, scroll, type_text, check_text, uncheck_text, download, conditional, loop, execute_js
+- **Playbook Executor** - Phase-loop engine with confirmation detection, CAPTCHA handling, error classification, and automatic screenshot capture on failure
+- **Async Job API** - Submit/poll/cancel endpoints with job lifecycle management (queued → running → completed/error/requires_manual/cancelled)
+- **Error Classification** - Maps Playwright exceptions to structured error_type with recovery_hint (captcha, timeout, element_not_found, navigation_failed, etc.)
+
+#### Celery Task Integration
+- **Scan Task Execution** - `run_scan_task` now dispatches jobs to Playwright service via HTTP
+- **Per-Broker Results** - Structured results stored with status, error_type, recovery_hint, and evidence URLs
+- **Graceful Cancel** - Running scans can be cancelled via API, propagating to Playwright job cancellation
+
+#### Mailwatcher Email Processing
+- **IMAP Polling** - Configurable mailbox monitoring with TLS support
+- **Email Parsing** - AI-assisted classification of broker confirmation responses
+- **Webhook Notifications** - Automatic notifications on processed emails
+- **Health & Status API** - FastAPI endpoints for monitoring and integration
+
+#### n8n Workflow Orchestration
+- **Scan Orchestration** - End-to-end workflow coordinating API → Celery → Playwright → Mailwatcher
+- **Opt-Out Orchestration** - Automated opt-out request processing across brokers
+- **Email Processing** - Workflow for handling and classifying broker email responses
+- **Error Handling** - Centralized error recovery and retry workflows
+
+#### Comprehensive Test Suite
+- **151 Playwright Unit Tests** - 6 test files covering token_resolver, actions, executor, pool, error_classifier, playbook_validator
+- **41 E2E Tests** - 3 test files covering API integration, Playwright service, and full scan flows
+- **237 Total Tests** - 45 API + 151 Playwright + 41 E2E = 100% coverage of Sprint 2 + Sprint 3 code
+
+---
+
 ## Version 0.2.0 - Sprint 2 Complete (2026-05-08)
 
 ### Overview
@@ -159,24 +231,33 @@ Error responses include an `error_code` field:
 
 ---
 
-### Known Limitations
-1. **Scan Execution** - Scan trigger creates a database record but does not yet dispatch Celery tasks (Sprint 3)
-2. **Password Reset** - Not yet implemented, planned for Sprint 3
+### Known Limitations (Version 0.2.0)
+1. **Scan Execution** - Scan trigger creates a database record but does not yet dispatch Celery tasks
+2. **Password Reset** - Not yet implemented
 3. **Real-time Updates** - Scan progress is polling-based; WebSocket support planned for Sprint 4
 4. **CORS** - Currently permissive (`*`), must be tightened for production deployment
-5. **Playwright Executor** - Browser automation not yet connected to scan tasks (Sprint 3)
-6. **Mailwatcher** - Email processing pipeline not yet active (Sprint 3)
+5. **Playwright Executor** - Browser automation not yet connected to scan tasks
+6. **Mailwatcher** - Email processing pipeline not yet active
 
 ---
 
-### What's Next (Sprint 3)
-- Playwright executor integration with broker playbooks
-- Celery task execution pipeline (scan → discover → delete → report)
-- Mailwatcher email processing for confirmation responses
-- n8n workflow orchestration between services
-- End-to-end test suite
-- Password reset flow
+### Known Limitations (Version 0.3.0)
+1. **Password Reset** - Not yet implemented, planned for Sprint 4
+2. **Real-time Updates** - Scan progress is polling-based; WebSocket support planned for Sprint 4
+3. **CORS** - Currently permissive (`*`), must be tightened for production deployment
+4. **Concurrent Scan Limits** - Browser pool size defaults to 3; may need tuning for high-volume deployments
+5. **CAPTCHA Solving** - CAPTCHAs are detected and flagged but not automatically solved; requires manual intervention
+6. **Email Verification** - Registration does not yet require email confirmation
 
+---
+
+### What's Next (Sprint 4)
+- Real-time scan progress via WebSocket
+- Password reset flow with email verification
+- Production CORS configuration and HTTPS setup
+- Performance optimization for concurrent scan execution
+- Advanced reporting and analytics dashboard
+- Multi-household support
 ---
 
 ### Getting Started
@@ -213,7 +294,33 @@ docker compose logs -f api
 
 ---
 
-### Files Added/Modified in This Release
+### Files Added/Modified in This Release (Version 0.3.0)
+**55+ new files created across Playwright executor, Mailwatcher, workflows, and tests.**
+
+Key additions:
+- `playwright/models.py` - Pydantic models (21 model classes)
+- `playwright/pool.py` - BrowserPool with anti-detection
+- `playwright/token_resolver.py` - SafeDict template engine
+- `playwright/actions.py` - 16 action handlers
+- `playwright/executor.py` - PlaybookExecutor engine
+- `playwright/main.py` - FastAPI service (port 8001)
+- `playwright/screenshot.py` - Screenshot path utility
+- `playwright/user_agents.json` - UA pool
+- `api/services/playwright_service.py` - HTTP client for Playwright
+- `mailwatcher/imap_client.py` - IMAP polling client
+- `mailwatcher/classifier.py` - AI email classification
+- `mailwatcher/repository.py` - Email storage repository
+- `mailwatcher/notifier.py` - Webhook notifications
+- `workflows/scan_orchestration.json` - n8n scan workflow
+- `workflows/opt_out_orchestration.json` - n8n opt-out workflow
+- `workflows/email_processing.json` - n8n email workflow
+- `workflows/error_handling.json` - n8n error handling
+- `e2e/` - 41 E2E tests across 3 files
+- `tests/unit/playwright/` - 151 unit tests across 6 files
+
+---
+
+### Files Added/Modified in Version 0.2.0
 **45+ new files created across backend, frontend, tests, and infrastructure.**
 
 Key additions:
@@ -230,4 +337,4 @@ Key additions:
 
 ---
 
-*HomeGuard - Take back your digital privacy.*
+*OpenDataRemoval - Take back your digital privacy.*

@@ -1,0 +1,1487 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 Database Schema Design",
+  "version": "1.0",
+  "engine": "PostgreSQL 15",
+  "extensions": [
+    "uuid-ossp",
+    "pgcrypto"
+  ],
+  "design_principles": {
+    "privacy_by_design": "All PII in identity schema encrypted via pgcrypto pgp_sym_encrypt with DB_ENCRYPTION_KEY",
+    "append_only_audit": "audit.audit_log is strictly append-only \u2014 no UPDATE/DELETE ever issued",
+    "versioned_history": "Profile fields stored as versioned rows with effective_from/effective_to timestamps",
+    "event_per_request": "Every broker exposure detection creates a new removal_request row; re-listings linked via parent_request_id",
+    "archive_before_delete": "Profile deletion copies all data to archive schema first in a single transaction",
+    "uuid_primary_keys": "All tables use UUID v4 via gen_random_uuid()"
+  },
+  "schemas": {
+    "identity": {
+      "description": "Household member profiles and encrypted PII fields",
+      "tables": {
+        "profiles": {
+          "description": "One row per household member. PK is UUID. Soft-deleted via deleted_at before archive.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK DEFAULT gen_random_uuid()"
+            },
+            {
+              "name": "household_id",
+              "type": "UUID",
+              "constraints": "FK auth.households"
+            },
+            {
+              "name": "display_name",
+              "type": "TEXT",
+              "constraints": "NOT NULL ENCRYPTED"
+            },
+            {
+              "name": "full_legal_name",
+              "type": "TEXT",
+              "constraints": "NOT NULL ENCRYPTED"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "DATE",
+              "constraints": "ENCRYPTED"
+            },
+            {
+              "name": "gender",
+              "type": "TEXT",
+              "constraints": "ENCRYPTED"
+            },
+            {
+              "name": "is_admin",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "is_paused",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "updated_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "deleted_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL \u2014 set before archive"
+            }
+          ]
+        },
+        "profile_fields": {
+          "description": "Versioned PII fields \u2014 addresses, phones, emails. Multiple current values allowed per type (e.g. mobile+landline both is_current=true). effective_to=NULL means current.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "field_type",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 enum: address|phone|email|employer|relative_name"
+            },
+            {
+              "name": "field_value",
+              "type": "TEXT",
+              "constraints": "NOT NULL ENCRYPTED"
+            },
+            {
+              "name": "field_subtype",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 mobile|landline|home|work|personal|previous"
+            },
+            {
+              "name": "is_current",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "effective_from",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "effective_to",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL = still current"
+            },
+            {
+              "name": "source",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 manual|import|verified"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ],
+          "multi_value_support": "Multiple rows with same field_type can have is_current=TRUE simultaneously (e.g. home + work address, mobile + landline). field_subtype distinguishes them."
+        },
+        "aliases": {
+          "description": "Name aliases and maiden names searched independently against brokers",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "alias_name",
+              "type": "TEXT",
+              "constraints": "NOT NULL ENCRYPTED"
+            },
+            {
+              "name": "alias_type",
+              "type": "TEXT",
+              "constraints": "enum: maiden_name|nickname|former_name|professional"
+            },
+            {
+              "name": "notes",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "identity_documents": {
+          "description": "Redacted ID document references for brokers requiring verification",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "document_type",
+              "type": "TEXT",
+              "constraints": "enum: drivers_license|passport|state_id|utility_bill"
+            },
+            {
+              "name": "file_path",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 path on opendataremoval_screenshots volume"
+            },
+            {
+              "name": "is_active",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "uploaded_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "expires_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            }
+          ]
+        }
+      }
+    },
+    "registry": {
+      "description": "Data broker catalog and versioned automation playbooks",
+      "tables": {
+        "brokers": {
+          "description": "Master broker catalog. canonical_domain is upsert key for n8n webhook.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "canonical_domain",
+              "type": "TEXT",
+              "constraints": "NOT NULL UNIQUE"
+            },
+            {
+              "name": "display_name",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "category",
+              "type": "TEXT",
+              "constraints": "enum: people_search|data_broker|background_check|social_web"
+            },
+            {
+              "name": "removal_method",
+              "type": "TEXT",
+              "constraints": "enum: web_form|email|legal_letter|manual|unsupported"
+            },
+            {
+              "name": "opt_out_url",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "contact_email",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "ccpa_applicable",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "gdpr_applicable",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "captcha_required",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "requires_manual",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "estimated_response_days",
+              "type": "INTEGER",
+              "constraints": "NULL \u2014 default 30"
+            },
+            {
+              "name": "is_active",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "last_verified_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "notes",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "discovered_via",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 n8n_feed|manual|seed"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "updated_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "broker_field_requirements": {
+          "description": "Maps required profile fields for each broker's opt-out submission",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "field_type",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "is_required",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "notes",
+              "type": "TEXT",
+              "constraints": "NULL"
+            }
+          ]
+        },
+        "broker_playbooks": {
+          "description": "Versioned automation playbooks. One active row per broker (is_active=TRUE). Prior versions retained for rollback.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "version",
+              "type": "INTEGER",
+              "constraints": "NOT NULL \u2014 monotonically increasing per broker"
+            },
+            {
+              "name": "is_active",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "playbook_json",
+              "type": "JSONB",
+              "constraints": "NOT NULL \u2014 full playbook definition"
+            },
+            {
+              "name": "change_notes",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_by",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 n8n_update|manual|seed_import"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "activated_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            }
+          ],
+          "unique_constraint": "UNIQUE(broker_id, version)"
+        },
+        "email_templates": {
+          "description": "Jinja2 template references for outbound removal emails and legal letters",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers NULL \u2014 NULL=generic fallback"
+            },
+            {
+              "name": "template_type",
+              "type": "TEXT",
+              "constraints": "enum: removal_email|ccpa_letter|gdpr_letter"
+            },
+            {
+              "name": "template_path",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 path to Jinja2 file in /templates/"
+            },
+            {
+              "name": "subject_line",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 for removal_email type"
+            },
+            {
+              "name": "is_active",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "updated_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        }
+      }
+    },
+    "scanning": {
+      "description": "Scan execution history, results, exposures, and evidence screenshots",
+      "tables": {
+        "scan_runs": {
+          "description": "One row per scan run. Status: pending\u2192running\u2192completed|failed|partial",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "run_type",
+              "type": "TEXT",
+              "constraints": "enum: daily_full|manual|verification|targeted"
+            },
+            {
+              "name": "triggered_by",
+              "type": "TEXT",
+              "constraints": "enum: celery_beat|api_manual|verification_scheduler"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK NULL \u2014 NULL=all profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK NULL \u2014 NULL=all brokers"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "constraints": "NOT NULL DEFAULT pending"
+            },
+            {
+              "name": "total_brokers",
+              "type": "INTEGER",
+              "constraints": "NULL"
+            },
+            {
+              "name": "completed_brokers",
+              "type": "INTEGER",
+              "constraints": "NOT NULL DEFAULT 0"
+            },
+            {
+              "name": "failed_brokers",
+              "type": "INTEGER",
+              "constraints": "NOT NULL DEFAULT 0"
+            },
+            {
+              "name": "started_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "completed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "scan_results": {
+          "description": "One row per broker per profile per scan run",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "scan_run_id",
+              "type": "UUID",
+              "constraints": "FK scanning.scan_runs"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "playbook_id",
+              "type": "UUID",
+              "constraints": "FK registry.broker_playbooks NULL"
+            },
+            {
+              "name": "result_status",
+              "type": "TEXT",
+              "constraints": "enum: found|not_found|inconclusive|captcha_blocked|rate_limited|error"
+            },
+            {
+              "name": "confidence_score",
+              "type": "NUMERIC(4,2)",
+              "constraints": "NULL \u2014 0.00-1.00"
+            },
+            {
+              "name": "retry_count",
+              "type": "INTEGER",
+              "constraints": "NOT NULL DEFAULT 0"
+            },
+            {
+              "name": "duration_ms",
+              "type": "INTEGER",
+              "constraints": "NULL"
+            },
+            {
+              "name": "error_message",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "scanned_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "exposures": {
+          "description": "One row per confirmed exposure (result_status=found). Re-listings create new rows \u2014 never reactivate old ones.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "scan_result_id",
+              "type": "UUID",
+              "constraints": "FK scanning.scan_results"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "fields_detected",
+              "type": "JSONB",
+              "constraints": "NOT NULL \u2014 array: [address,phone,email,...]"
+            },
+            {
+              "name": "broker_listing_url",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "is_active",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE \u2014 FALSE once removal confirmed"
+            },
+            {
+              "name": "first_detected_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "resolved_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            }
+          ]
+        },
+        "screenshots": {
+          "description": "Evidence screenshot metadata. Row retained after file purge.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "scan_result_id",
+              "type": "UUID",
+              "constraints": "FK scanning.scan_results"
+            },
+            {
+              "name": "file_path",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 path on opendataremoval_screenshots volume"
+            },
+            {
+              "name": "screenshot_type",
+              "type": "TEXT",
+              "constraints": "enum: scan_evidence|form_submission|confirmation|error"
+            },
+            {
+              "name": "file_size_bytes",
+              "type": "INTEGER",
+              "constraints": "NULL"
+            },
+            {
+              "name": "purge_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL \u2014 now() + SCREENSHOT_RETENTION_DAYS"
+            },
+            {
+              "name": "purged_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        }
+      }
+    },
+    "requests": {
+      "description": "Removal request lifecycle \u2014 one row per detection event",
+      "tables": {
+        "removal_requests": {
+          "description": "Core request table. parent_request_id links re-listing requests to original confirmed removal.",
+          "lifecycle": [
+            "detected",
+            "submitted",
+            "pending_confirmation",
+            "verification_scheduled",
+            "confirmed_removed",
+            "re_listed",
+            "failed",
+            "requires_manual"
+          ],
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "exposure_id",
+              "type": "UUID",
+              "constraints": "FK scanning.exposures"
+            },
+            {
+              "name": "parent_request_id",
+              "type": "UUID",
+              "constraints": "FK removal_requests NULL \u2014 set for re-listings"
+            },
+            {
+              "name": "request_method",
+              "type": "TEXT",
+              "constraints": "enum: web_form|email|ccpa_letter|gdpr_letter|manual"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "constraints": "NOT NULL DEFAULT detected"
+            },
+            {
+              "name": "submitted_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "confirmed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "verified_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "failed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "followup_count",
+              "type": "INTEGER",
+              "constraints": "NOT NULL DEFAULT 0"
+            },
+            {
+              "name": "next_action_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL \u2014 Celery ETA for next action"
+            },
+            {
+              "name": "celery_task_id",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "updated_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "request_status_log": {
+          "description": "Immutable status transition history \u2014 one row per status change",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests"
+            },
+            {
+              "name": "from_status",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 NULL for initial detected"
+            },
+            {
+              "name": "to_status",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "triggered_by",
+              "type": "TEXT",
+              "constraints": "enum: celery_worker|mailwatcher|api_manual|scan_result"
+            },
+            {
+              "name": "notes",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "changed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "followups": {
+          "description": "One row per follow-up attempt \u2014 max 3 per request before requires_manual",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests"
+            },
+            {
+              "name": "followup_number",
+              "type": "INTEGER",
+              "constraints": "NOT NULL \u2014 1|2|3"
+            },
+            {
+              "name": "method",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "sent_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "celery_task_id",
+              "type": "TEXT",
+              "constraints": "NULL"
+            }
+          ],
+          "check_constraint": "CHECK followup_number IN (1,2,3)"
+        },
+        "verification_scans": {
+          "description": "Tracks verification re-scans after broker confirms removal",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests"
+            },
+            {
+              "name": "scheduled_for",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "scan_result_id",
+              "type": "UUID",
+              "constraints": "FK scanning.scan_results NULL"
+            },
+            {
+              "name": "outcome",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 verified_removed|still_listed|inconclusive"
+            },
+            {
+              "name": "completed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            }
+          ]
+        }
+      }
+    },
+    "mail": {
+      "description": "Inbound email responses parsed by Mailwatcher",
+      "tables": {
+        "inbound_messages": {
+          "description": "One row per processed email. Raw body stored as TEXT. message_id_header is deduplication key.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "message_id_header",
+              "type": "TEXT",
+              "constraints": "NOT NULL UNIQUE \u2014 RFC 2822 Message-ID"
+            },
+            {
+              "name": "from_address",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "subject",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "raw_body_text",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 full body stored for dashboard review"
+            },
+            {
+              "name": "raw_body_html",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "received_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "processed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "message_classifications": {
+          "description": "Links inbound message to removal request with classification result",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "message_id",
+              "type": "UUID",
+              "constraints": "FK mail.inbound_messages"
+            },
+            {
+              "name": "request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests NULL"
+            },
+            {
+              "name": "classification",
+              "type": "TEXT",
+              "constraints": "enum: confirmed_removal|rejection|info_requested|unclassified"
+            },
+            {
+              "name": "confidence",
+              "type": "NUMERIC(4,2)",
+              "constraints": "NULL"
+            },
+            {
+              "name": "matched_pattern",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "action_taken",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 status_updated|notification_created|ignored"
+            },
+            {
+              "name": "classified_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        }
+      }
+    },
+    "audit": {
+      "description": "Append-only compliance log and system event log",
+      "tables": {
+        "audit_log": {
+          "description": "Append-only \u2014 no UPDATE/DELETE ever. Every outbound action writes here before execution.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "event_type",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 e.g. scan_started|removal_submitted|user_login"
+            },
+            {
+              "name": "actor_type",
+              "type": "TEXT",
+              "constraints": "enum: system|celery_worker|mailwatcher|n8n|user"
+            },
+            {
+              "name": "actor_id",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "entity_type",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 profile|broker|request|scan_run"
+            },
+            {
+              "name": "entity_id",
+              "type": "UUID",
+              "constraints": "NULL"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles NULL"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers NULL"
+            },
+            {
+              "name": "outcome",
+              "type": "TEXT",
+              "constraints": "enum: success|failure|pending"
+            },
+            {
+              "name": "detail",
+              "type": "JSONB",
+              "constraints": "NULL"
+            },
+            {
+              "name": "ip_address",
+              "type": "INET",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "system_events": {
+          "description": "Celery task execution log \u2014 separate from compliance audit_log",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "task_name",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "task_id",
+              "type": "TEXT",
+              "constraints": "NOT NULL UNIQUE"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "constraints": "enum: started|success|failure|retry"
+            },
+            {
+              "name": "retry_count",
+              "type": "INTEGER",
+              "constraints": "NOT NULL DEFAULT 0"
+            },
+            {
+              "name": "duration_ms",
+              "type": "INTEGER",
+              "constraints": "NULL"
+            },
+            {
+              "name": "error_message",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "kwargs",
+              "type": "JSONB",
+              "constraints": "NULL"
+            },
+            {
+              "name": "started_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "completed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            }
+          ]
+        }
+      }
+    },
+    "reporting": {
+      "description": "Pre-computed analytics \u2014 dashboard reads from here not from raw tables",
+      "tables": {
+        "exposure_scores": {
+          "description": "Daily exposure score per profile. Formula: ROUND(100 - ((active_exposures / NULLIF(max_ever,0)) * 100), 1)",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "score_date",
+              "type": "DATE",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "score",
+              "type": "NUMERIC(5,1)",
+              "constraints": "NOT NULL \u2014 0.0 to 100.0"
+            },
+            {
+              "name": "active_exposures",
+              "type": "INTEGER",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "total_confirmed_removed",
+              "type": "INTEGER",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "total_re_listings",
+              "type": "INTEGER",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "scan_run_id",
+              "type": "UUID",
+              "constraints": "FK scanning.scan_runs NULL"
+            },
+            {
+              "name": "computed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ],
+          "unique_constraint": "UNIQUE(profile_id, score_date)"
+        },
+        "daily_broker_snapshots": {
+          "description": "Per-broker status per profile per day \u2014 powers per-broker breakdown charts",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "exposure_score_id",
+              "type": "UUID",
+              "constraints": "FK reporting.exposure_scores"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "score_date",
+              "type": "DATE",
+              "constraints": "NOT NULL \u2014 denormalised"
+            },
+            {
+              "name": "status",
+              "type": "TEXT",
+              "constraints": "enum: not_found|exposed|submitted|confirmed_removed|re_listed|failed"
+            },
+            {
+              "name": "active_request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests NULL"
+            }
+          ]
+        },
+        "relisting_events": {
+          "description": "One row per confirmed re-listing event \u2014 powers re-listing tracker report",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "original_request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests"
+            },
+            {
+              "name": "relisting_request_id",
+              "type": "UUID",
+              "constraints": "FK requests.removal_requests"
+            },
+            {
+              "name": "days_until_relisting",
+              "type": "INTEGER",
+              "constraints": "NULL"
+            },
+            {
+              "name": "detected_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "field_exposure_summary": {
+          "description": "Materialised summary of exposed fields per profile per broker \u2014 refreshed post-scan",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles"
+            },
+            {
+              "name": "broker_id",
+              "type": "UUID",
+              "constraints": "FK registry.brokers"
+            },
+            {
+              "name": "field_type",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "is_currently_exposed",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "first_detected_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "last_seen_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "removed_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            }
+          ]
+        }
+      }
+    },
+    "auth": {
+      "description": "User accounts, sessions, and notification queue",
+      "tables": {
+        "users": {
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "username",
+              "type": "TEXT",
+              "constraints": "NOT NULL UNIQUE"
+            },
+            {
+              "name": "password_hash",
+              "type": "TEXT",
+              "constraints": "NOT NULL \u2014 bcrypt work_factor>=12"
+            },
+            {
+              "name": "role",
+              "type": "TEXT",
+              "constraints": "enum: admin|member"
+            },
+            {
+              "name": "linked_profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles NULL \u2014 member role only"
+            },
+            {
+              "name": "is_active",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT TRUE"
+            },
+            {
+              "name": "last_login_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        },
+        "sessions": {
+          "description": "Active JWT sessions. id is also the JWT jti claim for revocation.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK \u2014 also JWT jti claim"
+            },
+            {
+              "name": "user_id",
+              "type": "UUID",
+              "constraints": "FK auth.users"
+            },
+            {
+              "name": "issued_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            },
+            {
+              "name": "expires_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "revoked_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NULL \u2014 NULL=valid"
+            },
+            {
+              "name": "ip_address",
+              "type": "INET",
+              "constraints": "NULL"
+            },
+            {
+              "name": "user_agent",
+              "type": "TEXT",
+              "constraints": "NULL"
+            }
+          ]
+        },
+        "notifications": {
+          "description": "Dashboard notifications. Persisted for durability + pushed via Redis pub/sub WebSocket.",
+          "columns": [
+            {
+              "name": "id",
+              "type": "UUID",
+              "constraints": "PK"
+            },
+            {
+              "name": "user_id",
+              "type": "UUID",
+              "constraints": "FK auth.users NULL \u2014 NULL=all admins"
+            },
+            {
+              "name": "notification_type",
+              "type": "TEXT",
+              "constraints": "enum: new_exposure|removal_confirmed|relisting_detected|action_required|scan_failed|system_alert"
+            },
+            {
+              "name": "title",
+              "type": "TEXT",
+              "constraints": "NOT NULL"
+            },
+            {
+              "name": "body",
+              "type": "TEXT",
+              "constraints": "NULL"
+            },
+            {
+              "name": "entity_type",
+              "type": "TEXT",
+              "constraints": "NULL \u2014 request|broker|profile|scan_run"
+            },
+            {
+              "name": "entity_id",
+              "type": "UUID",
+              "constraints": "NULL"
+            },
+            {
+              "name": "profile_id",
+              "type": "UUID",
+              "constraints": "FK identity.profiles NULL"
+            },
+            {
+              "name": "is_read",
+              "type": "BOOLEAN",
+              "constraints": "NOT NULL DEFAULT FALSE"
+            },
+            {
+              "name": "created_at",
+              "type": "TIMESTAMPTZ",
+              "constraints": "NOT NULL DEFAULT now()"
+            }
+          ]
+        }
+      }
+    },
+    "archive": {
+      "description": "Mirrors of key tables \u2014 populated during profile deletion transaction before hard delete",
+      "deletion_sequence": [
+        "1. INSERT audit_log: profile_deletion_initiated",
+        "2. COPY identity rows to archive.profiles, archive.profile_fields, archive.aliases, archive.identity_documents",
+        "3. COPY scanning rows to archive.exposures, archive.scan_results",
+        "4. COPY request rows to archive.removal_requests, archive.request_status_log, archive.followups",
+        "5. COPY mail rows to archive.message_classifications",
+        "6. UPDATE identity.profiles SET deleted_at = now()",
+        "7. DELETE FROM identity.profiles CASCADE",
+        "8. INSERT audit_log: profile_deletion_complete"
+      ],
+      "extra_column": "archived_at TIMESTAMPTZ NOT NULL DEFAULT now() added to all archive tables",
+      "audit_log_note": "audit.audit_log records are never archived or deleted \u2014 retained permanently"
+    }
+  },
+  "key_indexes": [
+    {
+      "name": "idx_profile_fields_current",
+      "table": "identity.profile_fields",
+      "columns": "profile_id WHERE is_current=TRUE"
+    },
+    {
+      "name": "idx_exposures_active",
+      "table": "scanning.exposures",
+      "columns": "profile_id, broker_id WHERE is_active=TRUE"
+    },
+    {
+      "name": "idx_removal_requests_next_action",
+      "table": "requests.removal_requests",
+      "columns": "next_action_at WHERE status NOT IN (confirmed_removed, failed)"
+    },
+    {
+      "name": "idx_audit_log_created",
+      "table": "audit.audit_log",
+      "columns": "created_at"
+    },
+    {
+      "name": "idx_exposure_scores_profile_date",
+      "table": "reporting.exposure_scores",
+      "columns": "profile_id, score_date"
+    },
+    {
+      "name": "idx_notifications_user_unread",
+      "table": "auth.notifications",
+      "columns": "user_id, created_at WHERE is_read=FALSE"
+    },
+    {
+      "name": "idx_inbound_messages_msgid",
+      "table": "mail.inbound_messages",
+      "columns": "message_id_header"
+    }
+  ],
+  "key_constraints": [
+    {
+      "constraint": "UNIQUE(broker_id, version)",
+      "table": "registry.broker_playbooks"
+    },
+    {
+      "constraint": "UNIQUE(profile_id, score_date)",
+      "table": "reporting.exposure_scores"
+    },
+    {
+      "constraint": "CHECK followup_number IN (1,2,3)",
+      "table": "requests.followups"
+    },
+    {
+      "constraint": "UNIQUE(message_id_header)",
+      "table": "mail.inbound_messages"
+    }
+  ]
+}

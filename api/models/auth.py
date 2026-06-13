@@ -20,7 +20,7 @@ class Household(Base):
     __table_args__ = {"schema": "auth"}
 
     id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
-    name = Column(Text, nullable=False, default="HomeGuard")
+    name = Column(Text, nullable=False, default="OpenDataRemoval")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

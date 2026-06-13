@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 # Override database URL from environment if available
 database_url = os.environ.get(
     "DATABASE_URL",
-    "postgresql+asyncpg://homeguard:homeguard@db:5432/homeguard"
+    "postgresql+asyncpg://opendataremoval:opendataremoval@db:5432/opendataremoval"
 )
 config.set_main_option("sqlalchemy.url", database_url)
 

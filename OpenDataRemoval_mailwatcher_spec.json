@@ -1,0 +1,534 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 Mailwatcher Service Specification",
+  "version": "1.0",
+  "date": "May 2026",
+  "service": "mailwatcher",
+  "image": "python:3.11-slim",
+  "networks": [
+    "opendataremoval_net (DB + API access)",
+    "opendataremoval_egress (IMAP/SMTP)"
+  ],
+  "description": "Autonomous service that polls the dedicated removal email inbox via IMAP, parses and classifies inbound broker responses, links emails to removal requests, extracts verification links for automatic opt-out completion, and dispatches Celery tasks to update request status.",
+  "design_decisions": {
+    "classification_engine": "Keyword + regex hybrid \u2014 keyword pre-filter eliminates irrelevant emails cheaply, regex handles broker response phrasing variations",
+    "request_matching": "Sender domain + subject line combined \u2014 higher confidence than domain alone, handles brokers that send from multiple domains",
+    "post_processing": "Move to IMAP 'Processed' folder \u2014 preserves emails for human review and re-processing, prevents duplicate processing",
+    "verification_links": "Mailwatcher automatically extracts verification URLs and dispatches Celery task to trigger Playwright click \u2014 maintains fully-automatic design"
+  },
+  "configuration": {
+    "env_vars": {
+      "IMAP_HOST": {
+        "required": true,
+        "example": "imap.mailgun.org"
+      },
+      "IMAP_PORT": {
+        "required": true,
+        "default": 993
+      },
+      "IMAP_USER": {
+        "required": true,
+        "example": "removal@yourdomain.com"
+      },
+      "IMAP_PASSWORD": {
+        "required": true
+      },
+      "IMAP_USE_SSL": {
+        "default": true
+      },
+      "IMAP_INBOX_FOLDER": {
+        "default": "INBOX",
+        "description": "Folder to poll for new messages"
+      },
+      "IMAP_PROCESSED_FOLDER": {
+        "default": "Processed",
+        "description": "Folder messages are moved to after processing. Created automatically if it does not exist."
+      },
+      "IMAP_ERROR_FOLDER": {
+        "default": "ProcessingErrors",
+        "description": "Folder for messages that caused exceptions during processing"
+      },
+      "IMAP_POLL_INTERVAL_SECONDS": {
+        "default": 900,
+        "description": "15-minute polling interval"
+      },
+      "PATTERNS_FILE": {
+        "default": "/app/patterns.yml",
+        "description": "Path to classification patterns file"
+      },
+      "DATABASE_URL": {
+        "required": true,
+        "description": "PostgreSQL connection string"
+      },
+      "CELERY_BROKER_URL": {
+        "required": true,
+        "description": "Redis URL for dispatching Celery tasks"
+      },
+      "INTERNAL_API_URL": {
+        "default": "http://api:8000",
+        "description": "Base URL for internal API calls"
+      },
+      "INTERNAL_SERVICE_TOKEN": {
+        "required": true,
+        "description": "Shared secret for internal API auth"
+      }
+    }
+  },
+  "file_structure": {
+    "mailwatcher/": {
+      "Dockerfile": "python:3.11-slim + imaplib2, email, beautifulsoup4",
+      "main.py": "Entry point \u2014 poll loop, graceful shutdown handler",
+      "imap_client.py": "IMAPClient class \u2014 connection, polling, folder management",
+      "email_parser.py": "EmailParser class \u2014 extract sender, subject, body, links",
+      "classifier.py": "EmailClassifier class \u2014 keyword pre-filter + regex classification",
+      "request_matcher.py": "RequestMatcher class \u2014 link email to removal_request in DB",
+      "link_extractor.py": "VerificationLinkExtractor class \u2014 detect and extract opt-out verification URLs",
+      "dispatcher.py": "TaskDispatcher class \u2014 write to DB and dispatch Celery tasks",
+      "patterns.yml": "Configurable classification pattern definitions",
+      "models.py": "Pydantic models \u2014 ParsedEmail, ClassificationResult, MatchResult",
+      "requirements.txt": "imaplib2, beautifulsoup4, pyyaml, sqlalchemy, celery, pydantic, aiofiles, lxml"
+    }
+  },
+  "poll_loop": {
+    "description": "Main execution loop \u2014 runs continuously while the container is alive",
+    "cycle": [
+      "1. Connect to IMAP server (reconnect if connection dropped)",
+      "2. SELECT INBOX folder",
+      "3. SEARCH for UNSEEN messages",
+      "4. For each unseen message UID: fetch headers + body",
+      "5. Pass to EmailParser \u2192 ParsedEmail",
+      "6. Deduplicate via message_id_header check against mail.inbound_messages",
+      "7. Pass ParsedEmail to EmailClassifier \u2192 ClassificationResult",
+      "8. Pass ParsedEmail + ClassificationResult to RequestMatcher \u2192 MatchResult",
+      "9. If verification link detected: pass to VerificationLinkExtractor",
+      "10. Pass all results to TaskDispatcher \u2192 write DB + dispatch Celery tasks",
+      "11. Move message to IMAP Processed folder (or Error folder on exception)",
+      "12. Sleep IMAP_POLL_INTERVAL_SECONDS"
+    ],
+    "connection_resilience": {
+      "reconnect_on": [
+        "imaplib.IMAP4.error",
+        "ConnectionResetError",
+        "socket.timeout"
+      ],
+      "reconnect_backoff": "Exponential \u2014 30s, 60s, 120s, then 300s indefinitely",
+      "max_messages_per_poll": 50,
+      "note": "Cap of 50 prevents memory spike if inbox accumulates during downtime"
+    },
+    "imap_folder_management": {
+      "processed_folder_creation": "On startup: attempt IMAP CREATE Processed. Ignore error if already exists.",
+      "error_folder_creation": "Same as Processed \u2014 created on startup",
+      "move_operation": "IMAP COPY uid Processed; IMAP STORE uid +FLAGS (\\Deleted); IMAP EXPUNGE"
+    }
+  },
+  "email_parser": {
+    "description": "Converts raw IMAP message bytes into a structured ParsedEmail object",
+    "class": "EmailParser",
+    "module": "mailwatcher/email_parser.py",
+    "parsed_email_model": {
+      "message_id_header": "str \u2014 RFC 2822 Message-ID header (deduplication key)",
+      "from_address": "str \u2014 full From header value",
+      "from_domain": "str \u2014 extracted domain from From address (e.g. spokeo.com)",
+      "from_name": "str | None \u2014 display name if present",
+      "to_address": "str",
+      "subject": "str",
+      "subject_normalised": "str \u2014 lowercase, whitespace-collapsed, punctuation stripped",
+      "date": "datetime \u2014 parsed from Date header",
+      "raw_body_text": "str \u2014 plain text body (preferred)",
+      "raw_body_html": "str | None \u2014 HTML body if no plain text alternative",
+      "body_text_normalised": "str \u2014 lowercase, whitespace-collapsed body for matching",
+      "links": "list[str] \u2014 all URLs extracted from body (both text and HTML parts)",
+      "has_attachments": "bool",
+      "attachment_names": "list[str]"
+    },
+    "body_extraction": {
+      "preference": "text/plain preferred over text/html",
+      "html_fallback": "If only HTML body: strip tags via BeautifulSoup get_text() with separator=' '",
+      "encoding": "Decode with detected charset, fallback to utf-8, fallback to latin-1"
+    },
+    "link_extraction": {
+      "from_text": "Regex: r'https?://[^\\s<>\"]+' applied to raw_body_text",
+      "from_html": "BeautifulSoup find_all('a', href=True) applied to raw_body_html",
+      "deduplication": "list(dict.fromkeys(all_links)) \u2014 preserves order, removes duplicates"
+    }
+  },
+  "classifier": {
+    "description": "Two-stage classifier \u2014 keyword pre-filter then regex pattern matching per classification type",
+    "class": "EmailClassifier",
+    "module": "mailwatcher/classifier.py",
+    "classification_types": {
+      "confirmed_removal": "Broker confirmed the profile has been or will be removed",
+      "rejection": "Broker denied or cannot process the removal request",
+      "info_requested": "Broker needs additional information or identity verification before processing",
+      "verification_link": "Email contains a link that must be clicked to complete the opt-out",
+      "unclassified": "No pattern matched \u2014 requires human review"
+    },
+    "classification_result_model": {
+      "classification": "str \u2014 enum value above",
+      "confidence": "float 0.0-1.0 \u2014 based on number of patterns matched",
+      "matched_keywords": "list[str] \u2014 keywords that passed pre-filter",
+      "matched_patterns": "list[str] \u2014 regex patterns that matched",
+      "classification_source": "keyword_only | regex | hybrid",
+      "contains_verification_link": "bool",
+      "verification_link_url": "str | None"
+    },
+    "stage_1_keyword_prefilter": {
+      "description": "Fast O(n) check against lowercase body. If no keyword matches, classify as unclassified immediately without running regex engine.",
+      "purpose": "Eliminate irrelevant emails (spam, marketing from broker domains) cheaply",
+      "keyword_sources": "All keywords from all classification types in patterns.yml combined into a single set",
+      "implementation": "prefilter_keywords = set(); matched = any(kw in normalised_body for kw in prefilter_keywords)"
+    },
+    "stage_2_regex_matching": {
+      "description": "For emails that pass the keyword pre-filter, apply regex patterns per classification type in priority order",
+      "priority_order": [
+        "verification_link",
+        "confirmed_removal",
+        "info_requested",
+        "rejection"
+      ],
+      "note": "verification_link checked first because some verification emails also contain confirmed_removal language",
+      "matching_targets": [
+        "subject_normalised",
+        "body_text_normalised"
+      ],
+      "confidence_calculation": "matched_count / total_patterns_for_type \u2014 capped at 1.0",
+      "minimum_confidence_threshold": 0.15,
+      "multi_classification": "All types above threshold are scored. Highest confidence wins. Tie broken by priority_order."
+    }
+  },
+  "patterns_file": {
+    "description": "YAML file defining all classification patterns. Editable without code changes or image rebuild.",
+    "path": "mailwatcher/patterns.yml",
+    "format": {
+      "structure": "Top-level keys per classification type. Each has keywords (list) and patterns (list of regex strings).",
+      "flags": "All regex patterns compiled with re.IGNORECASE | re.DOTALL",
+      "reload": "Patterns file is reloaded on each poll cycle \u2014 live updates without container restart"
+    },
+    "example_patterns": {
+      "confirmed_removal": {
+        "keywords": [
+          "removed",
+          "deleted",
+          "opted out",
+          "opt-out",
+          "suppressed",
+          "processed",
+          "completed",
+          "successful",
+          "no longer",
+          "taken down"
+        ],
+        "patterns": [
+          "your (information|data|listing|record|profile) (has been|will be|was) (removed|deleted|suppressed|opted out)",
+          "opt.?out (request|submission) (has been|was) (received|processed|completed|confirmed)",
+          "successfully (removed|deleted|opted out|suppressed)",
+          "removal (request|process) (is|has been) (complete|completed|processed|fulfilled)",
+          "you (have been|are now) (removed|opted out|suppressed|delisted)",
+          "no longer (appear|listed|available|visible)",
+          "within \\d+ (days?|business days?|weeks?) (your|the) (information|data|listing)",
+          "your request (to|for) (remove|delete|opt.?out) has been"
+        ]
+      },
+      "rejection": {
+        "keywords": [
+          "unable",
+          "cannot",
+          "can't",
+          "denied",
+          "declined",
+          "not eligible",
+          "does not qualify",
+          "not found",
+          "no record",
+          "not able"
+        ],
+        "patterns": [
+          "unable to (process|complete|fulfill|verify) your (request|removal|opt.?out)",
+          "we (cannot|are unable to|can't) (remove|process|complete)",
+          "your request (has been|was) (denied|declined|rejected)",
+          "(not eligible|does not qualify) for (removal|opt.?out)",
+          "no (record|listing|information|data) (found|exists|on file)",
+          "we (did not|could not) (find|locate) (your|any) (record|listing|information)"
+        ]
+      },
+      "info_requested": {
+        "keywords": [
+          "verify",
+          "verification",
+          "identity",
+          "confirm",
+          "proof",
+          "government",
+          "id",
+          "additional information",
+          "provide",
+          "submit"
+        ],
+        "patterns": [
+          "(please|kindly) (provide|submit|send|attach) (a |your )?(copy of |valid )?(government.issued|photo) (id|identification|license)",
+          "(additional|more) (information|details|documentation) (is |are )?(required|needed|necessary)",
+          "(verify|confirm|prove) your (identity|ownership|claim)",
+          "we (need|require|request) (proof|verification|confirmation|documentation)",
+          "please (respond|reply) (to this email|with|by) (providing|attaching|including)",
+          "(id|identification|passport|license|utility bill) (is required|required|needed)",
+          "before (we can|processing|completing) (your request|the removal)",
+          "submit (a |your )?(notarized|signed|completed) (form|request|letter)"
+        ]
+      },
+      "verification_link": {
+        "keywords": [
+          "click",
+          "verify",
+          "confirm",
+          "link",
+          "button",
+          "complete",
+          "activate",
+          "action required",
+          "confirm your request"
+        ],
+        "patterns": [
+          "(click|follow|use) (the |this )?(link|button|url) (to |below )?(verify|confirm|complete)",
+          "(verify|confirm) your (email|request|removal|opt.?out) (by clicking|via the link)",
+          "action required.{0,50}(click|confirm|verify)",
+          "(to complete|complete your) (removal|opt.?out|request).{0,100}(click|link|button)",
+          "(please click|tap|select) (here|below|the button|the link)",
+          "confirm your (opt.?out|removal) request"
+        ]
+      }
+    },
+    "adding_patterns": "To add broker-specific patterns, add a broker_overrides section keyed by broker domain. These patterns are checked first before global patterns for emails from that domain.",
+    "broker_overrides_example": {
+      "spokeo.com": {
+        "confirmed_removal": {
+          "keywords": [
+            "suppressed",
+            "spokeo"
+          ],
+          "patterns": [
+            "your spokeo (listing|profile) has been (suppressed|removed)"
+          ]
+        }
+      }
+    }
+  },
+  "request_matcher": {
+    "description": "Links a parsed email to the most likely removal_request in the database using sender domain + subject line matching",
+    "class": "RequestMatcher",
+    "module": "mailwatcher/request_matcher.py",
+    "match_result_model": {
+      "request_id": "UUID | None \u2014 None if no match found",
+      "broker_id": "UUID | None",
+      "profile_id": "UUID | None",
+      "match_confidence": "float 0.0-1.0",
+      "match_method": "domain_and_subject | domain_only | subject_only | no_match",
+      "match_notes": "str \u2014 debug info about why this match was chosen"
+    },
+    "matching_algorithm": {
+      "step_1_domain_match": {
+        "description": "Extract sender domain from from_domain. Look up broker by canonical_domain.",
+        "query": "SELECT id FROM registry.brokers WHERE canonical_domain ILIKE '%{from_domain}%' OR contact_email ILIKE '%{from_domain}%'",
+        "result": "List of matching broker_ids (usually 1, occasionally 0 or 2+)"
+      },
+      "step_2_subject_match": {
+        "description": "For each matching broker, find pending removal requests and score subject line similarity",
+        "query": "SELECT id, profile_id FROM requests.removal_requests WHERE broker_id = %s AND status IN ('submitted','pending_confirmation') ORDER BY submitted_at DESC LIMIT 10",
+        "subject_scoring": "Normalise both subject_normalised and stored request subject. Count shared tokens. Score = shared_tokens / max(len(subject_tokens), len(request_subject_tokens)).",
+        "threshold": "Accept match if subject_score >= 0.3 OR domain_match is unique (only one pending request for this broker)"
+      },
+      "step_3_confidence_calculation": {
+        "domain_and_subject": "0.6 + (subject_score * 0.4) \u2014 max 1.0",
+        "domain_only": "0.5 \u2014 accepted when broker has exactly one pending request",
+        "subject_only": "0.3 \u2014 fallback when domain not in registry",
+        "no_match": "0.0 \u2014 unclassified notification created"
+      },
+      "ambiguous_match": "If multiple requests score similarly (within 0.1 of each other), pick most recent submitted_at. Log ambiguity warning."
+    }
+  },
+  "verification_link_extractor": {
+    "description": "Detects verification links in emails and automatically dispatches Celery task to click them via the Playwright executor",
+    "class": "VerificationLinkExtractor",
+    "module": "mailwatcher/link_extractor.py",
+    "detection": {
+      "trigger": "ClassificationResult.classification == verification_link OR ClassificationResult.contains_verification_link == True",
+      "link_scoring": {
+        "description": "Score each URL extracted from the email body to find the verification link",
+        "positive_indicators": [
+          "URL path contains: /verify, /confirm, /optout, /remove, /unsubscribe, /opt-out, /suppress",
+          "URL query params contain: token=, key=, confirm=, verify=, code=",
+          "URL domain matches from_domain of the email",
+          "URL appears in close proximity to verification keywords in body"
+        ],
+        "negative_indicators": [
+          "URL is an image/tracking pixel (ends in .png, .jpg, .gif, .ico, 1x1)",
+          "URL domain is a common email service (mailchimp.com, sendgrid.net, etc.)",
+          "URL is an unsubscribe link for the removal mailbox itself"
+        ],
+        "selection": "Highest scoring URL selected. If tie: first URL in body wins."
+      }
+    },
+    "automatic_dispatch": {
+      "description": "Once verification link is extracted, dispatch Celery task to continue the opt-out flow via Playwright",
+      "task_dispatched": "workers.tasks.requests.click_verification_link",
+      "task_inputs": {
+        "request_id": "UUID \u2014 from MatchResult",
+        "verification_url": "str \u2014 extracted URL",
+        "broker_id": "UUID",
+        "profile_id": "UUID"
+      },
+      "celery_dispatch": "click_verification_link.delay(request_id, verification_url, broker_id, profile_id)",
+      "link_token": "URL stored in profile_tokens as {email_verification_link} \u2014 passed to Playwright for the email_loop phase navigate action"
+    },
+    "click_verification_link_task": {
+      "description": "Celery task that receives a verification URL, creates a targeted Playwright job to click it, then awaits the optout completion",
+      "module": "workers.tasks.requests",
+      "implementation_notes": [
+        "Build a minimal single-phase playbook: { phases: [{ phase: verify, steps: [{ action: navigate, value: {email_verification_link} }, { action: wait_for_text, patterns: confirmation_patterns }] }] }",
+        "Inject verification_url as {email_verification_link} token",
+        "POST to /jobs/optout on Playwright service",
+        "Poll for result",
+        "On confirmed: update request.status=pending_confirmation, log audit_log: verification_link_clicked",
+        "On failed: set request.status=requires_manual, create action_required notification with raw email body"
+      ]
+    }
+  },
+  "task_dispatcher": {
+    "description": "Writes processing results to the database and dispatches appropriate Celery tasks",
+    "class": "TaskDispatcher",
+    "module": "mailwatcher/dispatcher.py",
+    "actions_per_classification": {
+      "confirmed_removal": [
+        "INSERT mail.inbound_messages (raw body stored)",
+        "INSERT mail.message_classifications with classification=confirmed_removal",
+        "UPDATE requests.removal_requests SET status=confirmed_removed, confirmed_at=now()",
+        "INSERT requests.request_status_log row",
+        "Schedule dispatch_verification_scan ETA: now() + 14 days",
+        "Dispatch create_notification.delay(type=removal_confirmed, ...)",
+        "INSERT audit.audit_log: email_response_processed"
+      ],
+      "rejection": [
+        "INSERT mail.inbound_messages",
+        "INSERT mail.message_classifications",
+        "UPDATE requests.removal_requests SET status=failed, failed_at=now()",
+        "INSERT requests.request_status_log",
+        "Dispatch create_notification.delay(type=action_required, body=raw_email_summary)",
+        "INSERT audit.audit_log: email_response_processed"
+      ],
+      "info_requested": [
+        "INSERT mail.inbound_messages",
+        "INSERT mail.message_classifications",
+        "UPDATE requests.removal_requests SET status=requires_manual",
+        "INSERT requests.request_status_log",
+        "Dispatch create_notification.delay(type=action_required, body includes raw email body)",
+        "INSERT audit.audit_log: email_response_processed"
+      ],
+      "verification_link": [
+        "INSERT mail.inbound_messages",
+        "INSERT mail.message_classifications with contains_verification_link=True",
+        "Dispatch click_verification_link.delay(request_id, verification_url, ...)",
+        "INSERT audit.audit_log: verification_link_extracted"
+      ],
+      "unclassified": [
+        "INSERT mail.inbound_messages (raw body preserved)",
+        "INSERT mail.message_classifications with classification=unclassified, request_id=null if no match",
+        "Dispatch create_notification.delay(type=action_required, title=Unclassified email received, body=raw email summary)",
+        "INSERT audit.audit_log: email_response_processed"
+      ]
+    },
+    "database_writes": "Direct SQLAlchemy sync session (mailwatcher runs synchronously \u2014 no async needed)",
+    "celery_dispatch": "Celery tasks dispatched via celery.send_task() with broker URL from CELERY_BROKER_URL"
+  },
+  "deduplication": {
+    "description": "Prevents the same email being processed twice \u2014 critical if container restarts or poll overlaps",
+    "method": "Check mail.inbound_messages for existing row with matching message_id_header BEFORE processing",
+    "query": "SELECT id FROM mail.inbound_messages WHERE message_id_header = %s",
+    "on_duplicate": "Skip processing entirely. Log debug: duplicate message_id skipped. Move to Processed folder.",
+    "fallback": "If email has no Message-ID header: generate a deterministic ID from SHA256(from_address + date + subject)"
+  },
+  "error_handling": {
+    "parse_error": "Log error with raw UID. Move message to IMAP_ERROR_FOLDER. Continue poll cycle.",
+    "db_write_error": "Log error with full context. Retry up to 3 times with 5s delay. On failure: leave in INBOX (will be re-processed next poll).",
+    "celery_dispatch_error": "Log error. Task dispatch is best-effort \u2014 DB writes already committed. Create action_required notification via direct DB insert as fallback.",
+    "imap_connection_error": "Log and reconnect with exponential backoff. Poll cycle resumes after reconnect.",
+    "no_match_found": "Classification and raw body still stored. Unclassified notification created. Not an error."
+  },
+  "logging": {
+    "format": "Structured JSON to stdout \u2014 compatible with Docker json-file log driver",
+    "fields_per_event": [
+      "timestamp",
+      "level",
+      "service=mailwatcher",
+      "event",
+      "message_id",
+      "from_domain",
+      "classification",
+      "match_confidence",
+      "request_id",
+      "duration_ms"
+    ],
+    "events_logged": [
+      "poll_started \u2014 messages found count",
+      "message_parsed \u2014 from_domain, subject",
+      "classification_result \u2014 type, confidence, patterns matched",
+      "request_matched \u2014 request_id, match_method, confidence",
+      "verification_link_extracted \u2014 url (truncated), request_id",
+      "task_dispatched \u2014 task name, request_id",
+      "message_moved \u2014 destination folder",
+      "duplicate_skipped \u2014 message_id",
+      "poll_completed \u2014 processed count, duration_ms",
+      "connection_error \u2014 reconnect attempt number"
+    ]
+  },
+  "patterns_file_full_spec": {
+    "schema": {
+      "global": {
+        "confirmed_removal": {
+          "keywords": "list[str]",
+          "patterns": "list[str regex]"
+        },
+        "rejection": {
+          "keywords": "list[str]",
+          "patterns": "list[str regex]"
+        },
+        "info_requested": {
+          "keywords": "list[str]",
+          "patterns": "list[str regex]"
+        },
+        "verification_link": {
+          "keywords": "list[str]",
+          "patterns": "list[str regex]"
+        }
+      },
+      "broker_overrides": {
+        "{canonical_domain}": {
+          "{classification_type}": {
+            "keywords": "list[str]",
+            "patterns": "list[str regex]"
+          }
+        }
+      },
+      "ignore_senders": "list[str] \u2014 domains to never process (e.g. noreply@mailchimp.com)",
+      "verification_link_negative_domains": "list[str] \u2014 URL domains to exclude from link scoring"
+    },
+    "reload_behaviour": "File stat()d on each poll cycle. If mtime changed: reload and recompile all regex patterns. Zero-downtime pattern updates.",
+    "validation": "On load: compile all regex patterns \u2014 raise ValueError with pattern and error if any fail to compile"
+  },
+  "startup_sequence": [
+    "1. Load and validate patterns.yml \u2014 compile all regex patterns",
+    "2. Connect to IMAP server with SSL",
+    "3. Create IMAP Processed and ProcessingErrors folders if absent",
+    "4. Verify DB connection via SQLAlchemy ping",
+    "5. Verify Celery broker connection via redis-py ping",
+    "6. Log startup: { service: mailwatcher, imap_host, poll_interval_seconds, patterns_loaded: N }",
+    "7. Begin poll loop"
+  ],
+  "health_indicators": {
+    "reported_to": "GET http://api:8000/api/system/health via internal API call",
+    "metrics": {
+      "last_poll_at": "ISO datetime of last successful poll completion",
+      "last_poll_messages_processed": "integer",
+      "imap_connected": "boolean",
+      "consecutive_errors": "integer \u2014 reset to 0 on successful poll",
+      "patterns_version": "string \u2014 mtime of patterns.yml"
+    }
+  }
+}

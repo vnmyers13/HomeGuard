@@ -1,0 +1,890 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 Implementation Checklist",
+  "version": "1.0",
+  "date": "May 2026",
+  "description": "Single-source implementation checklist tying all 14 documents together. Each task references its source document, lists exact deliverables, and defines the acceptance criteria that confirm the task is complete.",
+  "how_to_use": "Work through phases in order. Each task must meet its acceptance criteria before moving to the next. Tasks within a phase can be parallelised where noted.",
+  "document_reference_map": {
+    "DOC-1": "opendataremoval_requirements.json",
+    "DOC-2": "opendataremoval_architecture.json",
+    "DOC-3": "opendataremoval_database_schema.json",
+    "DOC-4": "opendataremoval_docker_compose_scaffold.json",
+    "DOC-5": "opendataremoval_api_specification.json",
+    "DOC-6": "opendataremoval_broker_playbook_schema.json",
+    "DOC-7": "opendataremoval_celery_task_catalogue.json",
+    "DOC-8": "opendataremoval_playwright_executor_spec.json",
+    "DOC-9": "opendataremoval_mailwatcher_spec.json",
+    "DOC-10": "opendataremoval_n8n_workflow_spec.json",
+    "DOC-11": "opendataremoval_frontend_dashboard_spec.json",
+    "DOC-12": "opendataremoval_security_spec.json",
+    "DOC-13": "opendataremoval_testing_qa_spec.json",
+    "DOC-14": "opendataremoval_operations_runbook.json"
+  },
+  "phases": [
+    {
+      "phase": 1,
+      "title": "Repository & Stack Foundation",
+      "description": "Establish the project structure, Docker Compose stack, and verify all services start correctly.",
+      "estimated_effort": "1-2 days",
+      "reference_docs": [
+        "DOC-4"
+      ],
+      "tasks": [
+        {
+          "id": "1.1",
+          "title": "Create project repository",
+          "deliverables": [
+            "Git repository initialised",
+            ".gitignore committed (includes .env)",
+            "Directory structure from DOC-4.file_structure created"
+          ],
+          "acceptance_criteria": [
+            "git status shows clean working tree",
+            "git check-ignore -v .env returns .gitignore:.env"
+          ]
+        },
+        {
+          "id": "1.2",
+          "title": "Author docker-compose.yml",
+          "reference": "DOC-4.docker_compose",
+          "deliverables": [
+            "docker-compose.yml with all 9 services",
+            "opendataremoval_net (internal:true) and opendataremoval_egress networks defined",
+            "5 named volumes defined",
+            "Memory limits set per DOC-4.memory_allocation_8gb_host"
+          ],
+          "acceptance_criteria": [
+            "docker compose config validates without errors",
+            "docker compose ps shows all 9 services listed"
+          ]
+        },
+        {
+          "id": "1.3",
+          "title": "Create .env from .env.example",
+          "reference": "DOC-4.env_variables",
+          "deliverables": [
+            ".env.example committed with all variables and descriptions",
+            ".env created with real values (not committed)",
+            "All secrets generated using commands from DOC-12.secret_generation"
+          ],
+          "acceptance_criteria": [
+            "grep -c CHANGE_ME .env returns 0",
+            "chmod 600 .env applied",
+            "No .env in git: git ls-files .env returns nothing"
+          ]
+        },
+        {
+          "id": "1.4",
+          "title": "Write docker/postgres/init.sql",
+          "reference": "DOC-4.postgres_init_sql",
+          "deliverables": [
+            "init.sql creates all 9 schemas",
+            "Grants all privileges to opendataremoval user",
+            "Installs uuid-ossp and pgcrypto extensions"
+          ],
+          "acceptance_criteria": [
+            "docker compose up -d db succeeds",
+            "docker compose exec db psql -U opendataremoval opendataremoval -c '\\dn' shows all 9 schemas"
+          ]
+        },
+        {
+          "id": "1.5",
+          "title": "Write Dockerfiles for api, playwright, frontend",
+          "reference": "DOC-4.dockerfiles",
+          "deliverables": [
+            "api/Dockerfile (multi-stage, non-root user)",
+            "playwright/Dockerfile (Chromium deps installed)",
+            "frontend/Dockerfile (node build + nginx serve)"
+          ],
+          "acceptance_criteria": [
+            "docker compose build completes without errors for all services"
+          ]
+        },
+        {
+          "id": "1.6",
+          "title": "Write and run init.sh",
+          "reference": "DOC-4.init_sh_steps",
+          "deliverables": [
+            "init.sh implements all 10 steps",
+            "Script is idempotent (safe to run twice)"
+          ],
+          "acceptance_criteria": [
+            "./init.sh completes without errors",
+            "curl http://localhost:8000/api/system/health returns {status: healthy}",
+            "Dashboard loads at http://localhost:3000"
+          ]
+        },
+        {
+          "id": "1.7",
+          "title": "Apply host security hardening",
+          "reference": "DOC-12.host_hardening",
+          "deliverables": [
+            "UFW rules applied and active",
+            "fail2ban installed and running for SSH and login endpoint",
+            "GPG-encrypted .env backup created"
+          ],
+          "acceptance_criteria": [
+            "sudo ufw status shows active with correct rules",
+            "sudo fail2ban-client status returns opendataremoval-login jail",
+            "gpg --decrypt ~/opendataremoval-secrets-backup.gpg | grep DB_ENCRYPTION_KEY returns 1 match"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "title": "Database Schema & Migrations",
+      "description": "Implement all PostgreSQL schemas, tables, and indexes via Alembic migrations.",
+      "estimated_effort": "2-3 days",
+      "reference_docs": [
+        "DOC-3"
+      ],
+      "tasks": [
+        {
+          "id": "2.1",
+          "title": "Implement SQLAlchemy models for identity schema",
+          "reference": "DOC-3.schemas.identity",
+          "deliverables": [
+            "models for profiles, profile_fields, aliases, identity_documents",
+            "pgcrypto encryption applied to all PII columns",
+            "Alembic migration created and applied"
+          ],
+          "acceptance_criteria": [
+            "alembic current shows head",
+            "Can INSERT profile with encrypted name and SELECT/decrypt it back",
+            "Direct psql SELECT of full_legal_name returns binary (not plain text)"
+          ]
+        },
+        {
+          "id": "2.2",
+          "title": "Implement registry, scanning, requests schemas",
+          "reference": "DOC-3.schemas.registry, scanning, requests",
+          "deliverables": [
+            "All 12 tables across 3 schemas with FK constraints",
+            "UNIQUE constraints per DOC-3.key_constraints",
+            "Alembic migration"
+          ],
+          "acceptance_criteria": [
+            "All tables exist in DB",
+            "FK violations caught on bad inserts",
+            "UNIQUE(broker_id, version) enforced on broker_playbooks"
+          ]
+        },
+        {
+          "id": "2.3",
+          "title": "Implement mail, audit, reporting, auth schemas",
+          "reference": "DOC-3.schemas.mail, audit, reporting, auth",
+          "deliverables": [
+            "All 10 remaining tables",
+            "audit.audit_log has no update/delete SQLAlchemy methods exposed",
+            "Alembic migration"
+          ],
+          "acceptance_criteria": [
+            "All schemas visible in \\dn",
+            "All tables visible in \\dt {schema}.*",
+            "Attempting session.delete(audit_log_row) raises AttributeError"
+          ]
+        },
+        {
+          "id": "2.4",
+          "title": "Create all recommended indexes",
+          "reference": "DOC-3.key_indexes",
+          "deliverables": [
+            "All 7 indexes created in migration"
+          ],
+          "acceptance_criteria": [
+            "\\di in psql shows all indexes",
+            "EXPLAIN ANALYZE on scan query uses idx_exposures_active"
+          ]
+        },
+        {
+          "id": "2.5",
+          "title": "Implement archive schema and deletion procedure",
+          "reference": "DOC-3.schemas.archive",
+          "deliverables": [
+            "archive schema with mirror tables + archived_at column",
+            "scripts/archive_profile.py implements 8-step transactional sequence"
+          ],
+          "acceptance_criteria": [
+            "Delete test profile \u2192 data appears in archive tables \u2192 deleted from primary tables \u2192 2 audit log entries created"
+          ]
+        },
+        {
+          "id": "2.6",
+          "title": "Seed broker registry",
+          "reference": "DOC-6, DOC-4.postgres_init_sql",
+          "deliverables": [
+            "scripts/seed_brokers.py loads all playbooks/brokers/*.json files",
+            "Validates each against playbooks/schema.json before insert",
+            "Creates at least 20 baseline broker records"
+          ],
+          "acceptance_criteria": [
+            "python scripts/seed_brokers.py exits 0",
+            "SELECT COUNT(*) FROM registry.brokers returns >= 20"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 3,
+      "title": "Core API (Authentication & Profiles)",
+      "description": "Build FastAPI foundation \u2014 auth, profile management, and the API layer shared by all other routers.",
+      "estimated_effort": "2-3 days",
+      "reference_docs": [
+        "DOC-5"
+      ],
+      "parallelisable": false,
+      "tasks": [
+        {
+          "id": "3.1",
+          "title": "FastAPI app skeleton with middleware",
+          "deliverables": [
+            "main.py with lifespan, CORS, rate limiting (slowapi)",
+            "JWT middleware as FastAPI dependency",
+            "Custom error handlers returning error envelope from DOC-5.conventions.error_envelope"
+          ],
+          "acceptance_criteria": [
+            "GET /api/system/health returns 200",
+            "GET /api/profiles with no token returns {error_code: token_missing}",
+            "POST /api/auth/login 11 times returns 429 on 11th"
+          ]
+        },
+        {
+          "id": "3.2",
+          "title": "Auth router \u2014 login, logout, me",
+          "reference": "DOC-5.routers.auth",
+          "deliverables": [
+            "POST /api/auth/login with bcrypt verify and JWT issue",
+            "POST /api/auth/logout with session revocation",
+            "GET /api/auth/me"
+          ],
+          "acceptance_criteria": [
+            "Critical path CP-01 tests all pass"
+          ]
+        },
+        {
+          "id": "3.3",
+          "title": "Profiles router \u2014 CRUD and fields",
+          "reference": "DOC-5.routers.profiles",
+          "deliverables": [
+            "All 8 profile endpoints implemented",
+            "Field versioning \u2014 effective_to stamped on update",
+            "Admin/member role enforcement"
+          ],
+          "acceptance_criteria": [
+            "POST /api/profiles creates encrypted profile",
+            "Add address \u2192 old address gets effective_to stamped \u2192 new address is_current=true",
+            "Member cannot create or delete profiles (403)"
+          ]
+        },
+        {
+          "id": "3.4",
+          "title": "Write auth and profile unit tests",
+          "reference": "DOC-13.unit_test_specifications.test_auth",
+          "deliverables": [
+            "tests/unit/api/test_auth.py \u2014 all 7 tests",
+            "tests/unit/api/test_profiles.py"
+          ],
+          "acceptance_criteria": [
+            "pytest tests/unit/api/ -v passes",
+            "Coverage >= 80% for api/routers/auth.py and api/routers/profiles.py"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 4,
+      "title": "Broker Registry & n8n Discovery",
+      "description": "Build broker API endpoints, import n8n workflows, and verify discovery pipeline.",
+      "estimated_effort": "2 days",
+      "reference_docs": [
+        "DOC-5",
+        "DOC-10"
+      ],
+      "parallelisable": true,
+      "tasks": [
+        {
+          "id": "4.1",
+          "title": "Brokers router \u2014 registry, playbooks, webhook",
+          "reference": "DOC-5.routers.brokers, DOC-5.routers.webhooks",
+          "deliverables": [
+            "All 5 broker endpoints",
+            "POST /api/webhooks/n8n with HMAC-SHA256 verification",
+            "Broker upsert by canonical_domain"
+          ],
+          "acceptance_criteria": [
+            "Signed webhook payload upserts brokers",
+            "Unsigned payload returns 401 with error_code=webhook_auth_failed",
+            "CP-06 tests pass"
+          ]
+        },
+        {
+          "id": "4.2",
+          "title": "Import n8n workflows",
+          "reference": "DOC-10.setup_checklist",
+          "deliverables": [
+            "All 5 workflow JSON files in workflows/ directory",
+            "WF-001 through WF-005 imported and active in n8n UI"
+          ],
+          "acceptance_criteria": [
+            "Manual trigger of WF-001 with dry_run=true completes successfully",
+            "n8n execution history shows successful run"
+          ]
+        },
+        {
+          "id": "4.3",
+          "title": "Run live broker discovery",
+          "deliverables": [
+            "Trigger WF-001 in live mode",
+            "Verify broker registry populated"
+          ],
+          "acceptance_criteria": [
+            "SELECT COUNT(*) FROM registry.brokers returns >= 50 after live run",
+            "Dashboard Broker Registry page shows brokers with categories"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 5,
+      "title": "Playwright Executor Service",
+      "description": "Build the headless browser microservice that performs all scanning and form submission.",
+      "estimated_effort": "3-4 days",
+      "reference_docs": [
+        "DOC-8",
+        "DOC-6"
+      ],
+      "tasks": [
+        {
+          "id": "5.1",
+          "title": "Browser pool and context management",
+          "reference": "DOC-8.browser_pool",
+          "deliverables": [
+            "pool.py \u2014 BrowserPool class, N contexts, context config with anti-detection",
+            "Startup sequence launches Chromium and warms pool"
+          ],
+          "acceptance_criteria": [
+            "GET /health returns {status: healthy, pool_available: N}",
+            "N concurrent scan requests are served, N+1 returns 503"
+          ]
+        },
+        {
+          "id": "5.2",
+          "title": "Token resolver and action handlers",
+          "reference": "DOC-8.executor_engine",
+          "deliverables": [
+            "token_resolver.py \u2014 all 16 tokens resolved",
+            "actions.py \u2014 all 16 action handlers implemented"
+          ],
+          "acceptance_criteria": [
+            "CP-test: all 16 token substitution unit tests pass",
+            "Each action handler maps to correct Playwright API call"
+          ]
+        },
+        {
+          "id": "5.3",
+          "title": "PlaybookExecutor \u2014 phase/step iteration",
+          "reference": "DOC-8.executor_engine.phase_execution",
+          "deliverables": [
+            "executor.py \u2014 full phase loop, on_failure handlers, dry_run skip, confirmation detection",
+            "Structured error classification per DOC-8.error_classification"
+          ],
+          "acceptance_criteria": [
+            "Simple playbook executes all steps and returns JobResult",
+            "dry_run=true skips submit action, all others run",
+            "Error produces auto-screenshot regardless of playbook screenshot flag"
+          ]
+        },
+        {
+          "id": "5.4",
+          "title": "Async job API endpoints",
+          "reference": "DOC-8.service_api",
+          "deliverables": [
+            "POST /jobs/scan, POST /jobs/optout, GET /jobs/{id}, DELETE /jobs/{id}, GET /jobs"
+          ],
+          "acceptance_criteria": [
+            "POST returns job_id immediately",
+            "Worker can poll to completion",
+            "Job TTL eviction after 1 hour"
+          ]
+        },
+        {
+          "id": "5.5",
+          "title": "Write playwright unit tests",
+          "reference": "DOC-13.unit_test_specifications.test_token_resolver",
+          "deliverables": [
+            "tests/unit/playwright/ \u2014 token resolver, confirmation, error classifier, screenshot path, playbook validator"
+          ],
+          "acceptance_criteria": [
+            "pytest tests/unit/playwright/ passes",
+            "All 16 token tests pass"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 6,
+      "title": "Celery Workers \u2014 Scan & Removal Pipeline",
+      "description": "Build the background task engine that orchestrates the full scan\u2192exposure\u2192removal\u2192verification lifecycle.",
+      "estimated_effort": "3-4 days",
+      "reference_docs": [
+        "DOC-7"
+      ],
+      "tasks": [
+        {
+          "id": "6.1",
+          "title": "Celery app config and Beat schedule",
+          "reference": "DOC-7.worker_config, DOC-7.beat_schedule",
+          "deliverables": [
+            "workers/celery_app.py with all config",
+            "Beat schedule: daily_full_scan, screenshot_purge, broker_health_check, hourly_followup_check"
+          ],
+          "acceptance_criteria": [
+            "celery -A workers.celery_app worker --loglevel=info starts without error",
+            "Beat schedule shows all 4 periodic tasks"
+          ]
+        },
+        {
+          "id": "6.2",
+          "title": "Scan tasks \u2014 dispatch chain and scan_broker",
+          "reference": "DOC-7.task_groups.scanning",
+          "deliverables": [
+            "dispatch_daily_scan, dispatch_profile_scan (chord), scan_broker, compute_post_scan_analytics, dispatch_verification_scan"
+          ],
+          "acceptance_criteria": [
+            "CP-02: test_full_scan_to_web_form_removal passes",
+            "Chord callback fires after all batch tasks complete",
+            "scan_broker creates exposure and dispatches removal on found result"
+          ]
+        },
+        {
+          "id": "6.3",
+          "title": "Removal request tasks",
+          "reference": "DOC-7.task_groups.requests",
+          "deliverables": [
+            "execute_removal_request, submit_web_form_optout, send_removal_email, generate_and_send_legal_letter, followup_removal_request, process_due_followups, process_email_classification"
+          ],
+          "acceptance_criteria": [
+            "CP-03: confirmed removal triggers verification schedule",
+            "CP-05: followup escalates to requires_manual after 3 attempts",
+            "CCPA letter PDF generated and attached to email"
+          ]
+        },
+        {
+          "id": "6.4",
+          "title": "Maintenance and registry tasks",
+          "reference": "DOC-7.task_groups.maintenance, DOC-7.task_groups.registry",
+          "deliverables": [
+            "purge_expired_screenshots, compute_disk_usage, check_broker_opt_out_urls, upsert_broker_from_discovery"
+          ],
+          "acceptance_criteria": [
+            "Screenshot files older than SCREENSHOT_RETENTION_DAYS are deleted, rows retained",
+            "Disk usage metric visible in /api/system/health"
+          ]
+        },
+        {
+          "id": "6.5",
+          "title": "Write worker integration tests",
+          "reference": "DOC-13.integration_test_specifications",
+          "deliverables": [
+            "tests/integration/test_scan_to_removal.py \u2014 all 4 critical tests",
+            "tests/integration/test_email_response_flow.py"
+          ],
+          "acceptance_criteria": [
+            "All CP-02 through CP-05 critical path tests pass",
+            "pytest tests/integration/ -m critical passes"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 7,
+      "title": "Mailwatcher Service",
+      "description": "Build the IMAP polling and email classification service.",
+      "estimated_effort": "2 days",
+      "reference_docs": [
+        "DOC-9"
+      ],
+      "parallelisable": true,
+      "tasks": [
+        {
+          "id": "7.1",
+          "title": "IMAP client and poll loop",
+          "reference": "DOC-9.poll_loop, DOC-9.imap_client",
+          "deliverables": [
+            "imap_client.py \u2014 connect, poll, move to Processed/Error folder",
+            "Exponential backoff on connection failure",
+            "50-message cap per poll"
+          ],
+          "acceptance_criteria": [
+            "docker compose logs mailwatcher shows poll_completed every 15 minutes",
+            "Processed email appears in IMAP Processed folder"
+          ]
+        },
+        {
+          "id": "7.2",
+          "title": "Email parser and classifier",
+          "reference": "DOC-9.email_parser, DOC-9.classifier, DOC-9.patterns_file",
+          "deliverables": [
+            "email_parser.py returning ParsedEmail",
+            "classifier.py \u2014 keyword pre-filter + regex two-stage engine",
+            "patterns.yml with all 4 classification types and example patterns"
+          ],
+          "acceptance_criteria": [
+            "CP-09: all 3 classifier unit tests pass",
+            "patterns.yml hot-reloads on file change without restart"
+          ]
+        },
+        {
+          "id": "7.3",
+          "title": "Request matcher and task dispatcher",
+          "reference": "DOC-9.request_matcher, DOC-9.task_dispatcher, DOC-9.verification_link_extractor",
+          "deliverables": [
+            "request_matcher.py \u2014 domain + subject scoring",
+            "link_extractor.py \u2014 verification URL detection and auto-dispatch",
+            "dispatcher.py \u2014 DB writes + Celery dispatch per classification type"
+          ],
+          "acceptance_criteria": [
+            "CP-03: email confirmed removal triggers verification schedule",
+            "Verification link extracted and click_verification_link task dispatched automatically"
+          ]
+        },
+        {
+          "id": "7.4",
+          "title": "Write mailwatcher unit tests",
+          "reference": "DOC-13.unit_test_specifications.test_classifier",
+          "deliverables": [
+            "tests/unit/mailwatcher/ \u2014 all test files"
+          ],
+          "acceptance_criteria": [
+            "pytest tests/unit/mailwatcher/ passes",
+            "All 9 classifier tests pass including hot-reload test"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 8,
+      "title": "Remaining API Routers",
+      "description": "Complete the remaining FastAPI routers \u2014 scans, requests, reports, notifications, system.",
+      "estimated_effort": "2-3 days",
+      "reference_docs": [
+        "DOC-5"
+      ],
+      "parallelisable": true,
+      "tasks": [
+        {
+          "id": "8.1",
+          "title": "Scans router + SSE endpoint",
+          "reference": "DOC-5.routers.scans",
+          "deliverables": [
+            "POST /api/scans, GET /api/scans, GET /api/scans/{id}, GET /api/scans/{id}/results",
+            "GET /api/scans/{id}/progress (SSE) \u2014 reads from Redis pub/sub channel"
+          ],
+          "acceptance_criteria": [
+            "POST /api/scans returns 202 with scan_run_id",
+            "SSE stream receives scan_progress events as scan_broker tasks complete",
+            "SSE stream closes with scan_complete event"
+          ]
+        },
+        {
+          "id": "8.2",
+          "title": "Requests, reports, notifications, system routers",
+          "reference": "DOC-5.routers.requests, reports, notifications, system",
+          "deliverables": [
+            "All remaining 20 endpoints implemented",
+            "Cursor pagination on requests, audit_log, notifications",
+            "GET /api/system/health reads from Redis disk_usage cache"
+          ],
+          "acceptance_criteria": [
+            "All 38 endpoints return expected shapes",
+            "Cursor pagination works \u2014 next page returns different records",
+            "Audit log is read-only \u2014 no delete/update endpoints"
+          ]
+        },
+        {
+          "id": "8.3",
+          "title": "WebSocket notification endpoint",
+          "reference": "DOC-5.routers.notifications (WebSocket section)",
+          "deliverables": [
+            "WebSocket handler at /api/ws/notifications",
+            "Redis pub/sub subscriber \u2014 fans out to connected clients",
+            "Ping/pong heartbeat with 30s interval"
+          ],
+          "acceptance_criteria": [
+            "Two browser tabs both receive notification when create_notification task fires",
+            "Connection persists through 60s idle (heartbeat working)"
+          ]
+        },
+        {
+          "id": "8.4",
+          "title": "Write remaining API unit + integration tests",
+          "reference": "DOC-13",
+          "deliverables": [
+            "tests/integration/test_webhook_upsert.py",
+            "tests/integration/test_pagination.py"
+          ],
+          "acceptance_criteria": [
+            "pytest tests/ -v overall coverage >= 80%",
+            "All CP-06, CP-07, CP-08 critical path tests pass"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 9,
+      "title": "React Frontend Dashboard",
+      "description": "Build the complete React dashboard.",
+      "estimated_effort": "4-6 days",
+      "reference_docs": [
+        "DOC-11"
+      ],
+      "tasks": [
+        {
+          "id": "9.1",
+          "title": "App foundation \u2014 stores, api client, routing",
+          "reference": "DOC-11.zustand_stores, DOC-11.axios_client, DOC-11.routing",
+          "deliverables": [
+            "All 4 Zustand stores (auth, theme, notifications, scanProgress)",
+            "Axios client with JWT interceptor and 401/429 handlers",
+            "React Router routes with RequireAuth guard",
+            "Dark/light mode toggle working"
+          ],
+          "acceptance_criteria": [
+            "CP-10: JWT never stored in localStorage test passes",
+            "Unauthenticated route redirects to /login",
+            "Theme persists through page refresh"
+          ]
+        },
+        {
+          "id": "9.2",
+          "title": "WebSocket hook and SSE hook",
+          "reference": "DOC-11.websocket_hook, DOC-11.sse_hook",
+          "deliverables": [
+            "useWebSocket.js \u2014 connect/disconnect/reconnect/ping-pong",
+            "useScanSSE.js \u2014 EventSource lifecycle tied to scanProgressStore"
+          ],
+          "acceptance_criteria": [
+            "Notification bell badge increments on new notification without page refresh",
+            "Scan progress bar moves in real time during active scan"
+          ]
+        },
+        {
+          "id": "9.3",
+          "title": "Common components",
+          "reference": "DOC-11.file_structure.components.common",
+          "deliverables": [
+            "StatusBadge, ScoreGauge (animated SVG), ScoreTrendChart, DataTable, EmptyState, LoadingSkeleton, ErrorBanner, ConfirmDialog"
+          ],
+          "acceptance_criteria": [
+            "StatusBadge component tests all pass",
+            "ScoreGauge component tests (stroke-dashoffset) all pass",
+            "ScoreGauge animates on score change"
+          ]
+        },
+        {
+          "id": "9.4",
+          "title": "Dashboard, Profile Detail, Request Tracker pages",
+          "reference": "DOC-11.pages.DashboardPage, ProfileDetailPage, RequestTrackerPage",
+          "deliverables": [
+            "DashboardPage \u2014 stats cards, profile gauges, activity feed",
+            "ProfileDetailPage \u2014 4 tabs with exposure trend, broker status, requests, fields",
+            "RequestTrackerPage \u2014 filter tabs, paginated table, row expansion with timeline"
+          ],
+          "acceptance_criteria": [
+            "Dashboard loads in < 2s",
+            "Profile score gauge animates on load",
+            "Request filter tabs update visible rows correctly"
+          ]
+        },
+        {
+          "id": "9.5",
+          "title": "Reports, System Health, Settings, Onboarding pages",
+          "reference": "DOC-11.pages",
+          "deliverables": [
+            "ReportsPage \u2014 4 tab report views with export buttons",
+            "SystemHealthPage \u2014 service grid + disk bars + queue depth",
+            "SettingsPage \u2014 profile management",
+            "OnboardingPage \u2014 5-step wizard"
+          ],
+          "acceptance_criteria": [
+            "CSV export triggers file download",
+            "System Health shows all services green on healthy stack",
+            "Onboarding wizard redirects to dashboard and never re-shows after completion"
+          ]
+        },
+        {
+          "id": "9.6",
+          "title": "Write frontend tests",
+          "reference": "DOC-13.frontend_test_specifications",
+          "deliverables": [
+            "Store tests, hook tests, component tests, page tests per DOC-13"
+          ],
+          "acceptance_criteria": [
+            "npx vitest run passes",
+            "Frontend coverage >= 75%",
+            "CP-10 localStorage test passes"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 10,
+      "title": "E2E Tests & Final Verification",
+      "description": "Run the full test suite against the live stack and verify all critical paths.",
+      "estimated_effort": "1-2 days",
+      "reference_docs": [
+        "DOC-13"
+      ],
+      "tasks": [
+        {
+          "id": "10.1",
+          "title": "Set up E2E test infrastructure",
+          "reference": "DOC-13.e2e_test_infrastructure",
+          "deliverables": [
+            "e2e/playwright.config.ts",
+            "docker-compose.test.yml with test-only volumes",
+            "e2e/helpers/fake_broker_server.py",
+            "global-setup.ts and global-teardown.ts"
+          ],
+          "acceptance_criteria": [
+            "npx playwright test --list shows all test files",
+            "docker compose -f docker-compose.test.yml up passes health check"
+          ]
+        },
+        {
+          "id": "10.2",
+          "title": "Write and run all E2E tests",
+          "reference": "DOC-13.e2e_test_infrastructure.e2e_test_specifications",
+          "deliverables": [
+            "All 8 E2E spec files written",
+            "Auth fixture reuses saved state"
+          ],
+          "acceptance_criteria": [
+            "npx playwright test passes on Chromium and Firefox",
+            "CP-11, CP-12, CP-13 all pass"
+          ]
+        },
+        {
+          "id": "10.3",
+          "title": "Run full test suite and verify all quality gates",
+          "reference": "DOC-13.quality_gates",
+          "commands": [
+            "pytest tests/ \u2014 backend coverage >= 80%",
+            "npx vitest run \u2014 frontend coverage >= 75%",
+            "npx playwright test \u2014 all E2E pass"
+          ],
+          "acceptance_criteria": [
+            "All 13 critical paths (CP-01 through CP-13) pass",
+            "No test marked critical is failing",
+            "Coverage gates met"
+          ]
+        },
+        {
+          "id": "10.4",
+          "title": "Run security verification checklist",
+          "reference": "DOC-12.security_verification_checklist",
+          "deliverables": [
+            "All 12 security checks executed and documented"
+          ],
+          "acceptance_criteria": [
+            "All 12 checks return expected results",
+            "No secrets visible in git history: git log -p | grep -i password \u2014 returns nothing sensitive"
+          ]
+        },
+        {
+          "id": "10.5",
+          "title": "Onboard household and run first live scan",
+          "reference": "DOC-14.common_operational_tasks.add_new_household_member",
+          "deliverables": [
+            "Admin account created",
+            "At least 1 household profile with full PII fields",
+            "First full scan completed successfully",
+            "At least 1 removal request created"
+          ],
+          "acceptance_criteria": [
+            "Dashboard shows exposure score < 100 (exposures found)",
+            "Removal requests visible in Request Tracker",
+            "Audit log shows scan_started and removal_initiated events"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 11,
+      "title": "Operations Setup",
+      "description": "Establish ongoing operational procedures.",
+      "estimated_effort": "2 hours",
+      "reference_docs": [
+        "DOC-14",
+        "DOC-12"
+      ],
+      "tasks": [
+        {
+          "id": "11.1",
+          "title": "Configure backup schedule",
+          "reference": "DOC-14.maintenance_schedule.weekly, DOC-12.backup_procedures",
+          "deliverables": [
+            "Daily backup cron job installed",
+            "Backup verified restorable (dry run)"
+          ],
+          "acceptance_criteria": [
+            "crontab -l shows backup entry",
+            "Backup decrypt + tar listing completes successfully"
+          ]
+        },
+        {
+          "id": "11.2",
+          "title": "Configure secret rotation reminder",
+          "reference": "DOC-12.rotation_procedures.recommended_schedule",
+          "deliverables": [
+            "90-day cron reminder configured"
+          ],
+          "acceptance_criteria": [
+            "crontab -l shows quarterly reminder entry"
+          ]
+        },
+        {
+          "id": "11.3",
+          "title": "Bookmark maintenance procedures",
+          "reference": "DOC-14.maintenance_schedule",
+          "deliverables": [
+            "Weekly, monthly, quarterly checklists accessible",
+            "Runbook bookmarked or printed for reference"
+          ],
+          "acceptance_criteria": [
+            "Operator can execute weekly maintenance check in < 10 minutes using DOC-14"
+          ]
+        }
+      ]
+    }
+  ],
+  "completion_definition": {
+    "description": "OpenDataRemoval is considered fully implemented when ALL of the following are true",
+    "criteria": [
+      "All 11 phases completed with acceptance criteria met",
+      "All 13 critical paths (CP-01 through CP-13) passing",
+      "Backend test coverage >= 80%, frontend >= 75%",
+      "All 12 security verification checks pass",
+      "At least 1 household profile onboarded with real PII",
+      "First full scan completed and removal requests created",
+      "Daily backup schedule running and verified restorable",
+      "System Health dashboard shows all services green"
+    ]
+  },
+  "effort_summary": {
+    "phase_1_stack_foundation": "1-2 days",
+    "phase_2_database": "2-3 days",
+    "phase_3_auth_profiles": "2-3 days",
+    "phase_4_brokers_n8n": "2 days",
+    "phase_5_playwright": "3-4 days",
+    "phase_6_celery_workers": "3-4 days",
+    "phase_7_mailwatcher": "2 days",
+    "phase_8_remaining_api": "2-3 days",
+    "phase_9_frontend": "4-6 days",
+    "phase_10_e2e_verification": "1-2 days",
+    "phase_11_operations": "2 hours",
+    "total_estimated": "22-32 developer days",
+    "note": "Phases 4, 7, and parts of 8 can be parallelised. Solo developer realistic timeline: 6-8 weeks."
+  }
+}

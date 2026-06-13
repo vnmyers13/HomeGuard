@@ -1,0 +1,244 @@
+{
+  "name": "OpenDataRemoval Error Handling & Retry",
+  "description": "Centralized error handling, classification, retry logic, and alerting for all workflows",
+  "nodes": [
+    {
+      "id": "error_trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "error-handle",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "notes": "Receives error events from any workflow."
+    },
+    {
+      "id": "classify_error",
+      "name": "Classify Error",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [220, 0],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.error_type }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "retryable"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.error_type }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "token_expired"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.error_type }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "playbook_invalid"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.error_type }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "fatal"
+            }
+          ]
+        }
+      },
+      "notes": "Classifies error as retryable, token_expired, playbook_invalid, or fatal."
+    },
+    {
+      "id": "check_retry_count",
+      "name": "Check Retry Count",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [440, -220],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.retry_count || 0 }}",
+              "operation": "largerEqual"
+            }
+          ]
+        }
+      },
+      "notes": "Checks if retry count exceeds maximum (3)."
+    },
+    {
+      "id": "retry_delay",
+      "name": "Retry Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [660, -440],
+      "parameters": {
+        "waitTime": "={{ 60 * ($json.retry_count || 1) }}",
+        "waitTimeUnit": "unitSeconds"
+      },
+      "notes": "Exponential backoff delay before retry."
+    },
+    {
+      "id": "retry_workflow",
+      "name": "Retry Workflow",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [880, -440],
+      "parameters": {
+        "workflowId": "={{ $json.source_workflow_id }}",
+        "fields": {
+          "json": "={{ Object.assign($json, { retry_count: ($json.retry_count || 0) + 1 }) }}"
+        }
+      },
+      "notes": "Re-executes the source workflow with incremented retry count."
+    },
+    {
+      "id": "token_refresh_trigger",
+      "name": "Token Refresh Trigger",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/token-refresh-trigger",
+        "body": "={{ JSON.stringify({ broker_domain: $json.broker_domain, scan_id: $json.scan_id }) }}"
+      },
+      "notes": "Triggers token refresh via email captcha resolution."
+    },
+    {
+      "id": "playbook_validation_alert",
+      "name": "Playbook Validation Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [440, 220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/playbook-alert",
+        "body": "={{ JSON.stringify({ broker_domain: $json.broker_domain, error: $json.error_message }) }}"
+      },
+      "notes": "Alerts that playbook needs updating."
+    },
+    {
+      "id": "fatal_error_alert",
+      "name": "Fatal Error Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, 220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/fatal-error-alert",
+        "body": "={{ JSON.stringify({ scan_id: $json.scan_id, error: $json.error_message, retry_count: $json.retry_count }) }}"
+      },
+      "notes": "Sends critical alert for fatal errors."
+    },
+    {
+      "id": "log_error",
+      "name": "Log Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [880, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/errors",
+        "body": "={{ JSON.stringify({ ...$json, handled_at: new Date().toISOString() }) }}"
+      },
+      "notes": "Logs error to database for audit trail."
+    },
+    {
+      "id": "error_response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1100, 0],
+      "parameters": {
+        "responseBody": "={{ JSON.stringify({ status: 'handled', error_type: $json.error_type }) }}",
+        "options": {}
+      },
+      "notes": "Returns error handling result."
+    }
+  ],
+  "connections": {
+    "error_trigger": {
+      "main": [
+        [{ "node": "classify_error", "type": "main", "index": 0 }]
+      ]
+    },
+    "classify_error": {
+      "main": [
+        [{ "node": "check_retry_count", "type": "main", "index": 0 }],
+        [{ "node": "token_refresh_trigger", "type": "main", "index": 0 }],
+        [{ "node": "playbook_validation_alert", "type": "main", "index": 0 }],
+        [{ "node": "fatal_error_alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "check_retry_count": {
+      "main": [
+        [{ "node": "retry_delay", "type": "main", "index": 0 }],
+        [{ "node": "fatal_error_alert", "type": "main", "index": 0 }]
+      ]
+    },
+    "retry_delay": {
+      "main": [
+        [{ "node": "retry_workflow", "type": "main", "index": 0 }]
+      ]
+    },
+    "retry_workflow": {
+      "main": [
+        [{ "node": "log_error", "type": "main", "index": 0 }]
+      ]
+    },
+    "token_refresh_trigger": {
+      "main": [
+        [{ "node": "log_error", "type": "main", "index": 0 }]
+      ]
+    },
+    "playbook_validation_alert": {
+      "main": [
+        [{ "node": "log_error", "type": "main", "index": 0 }]
+      ]
+    },
+    "fatal_error_alert": {
+      "main": [
+        [{ "node": "log_error", "type": "main", "index": 0 }]
+      ]
+    },
+    "log_error": {
+      "main": [
+        [{ "node": "error_response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": ""
+  },
+  "staticData": {
+    "description": "Centralized error handling with retry logic, token refresh triggers, and alerting.",
+    "version": "1.0.0",
+    "max_retries": 3,
+    "retry_base_delay_seconds": 60,
+    "environment_vars": [
+      "HOMEGUARD_API_URL"
+    ]
+  }
+}

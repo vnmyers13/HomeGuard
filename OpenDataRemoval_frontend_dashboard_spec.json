@@ -1,0 +1,680 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 Frontend Dashboard Specification",
+  "version": "1.0",
+  "date": "May 2026",
+  "service": "frontend",
+  "stack": {
+    "framework": "React 18",
+    "build_tool": "Vite",
+    "styling": "Tailwind CSS",
+    "state_global": "Zustand",
+    "state_server": "TanStack Query (React Query v5)",
+    "routing": "React Router v6",
+    "charts": "Recharts",
+    "icons": "Lucide React",
+    "served_by": "Nginx Alpine",
+    "theme": "Polished \u2014 dark/light mode, animated score gauges, colour-coded status badges",
+    "responsive_target": "Desktop-first 1280px+, tablet secondary (768px+)"
+  },
+  "design_decisions": {
+    "state_management": "Zustand for client-only global state (auth token, theme, notification badge count, active scan progress). TanStack Query for all server state (profiles, brokers, requests, reports).",
+    "theme": "Polished dark/light mode toggle. Colour-coded status system: red=exposed/failed, green=removed/confirmed, amber=pending/submitted, blue=informational. Animated circular score gauges.",
+    "responsive": "Desktop-first 1280px+. Sidebar collapses to icon-only at 768px. Tables become cards on tablet.",
+    "token_storage": "JWT stored in Zustand memory store only \u2014 never localStorage. On page refresh user re-authenticates.",
+    "real_time": "WebSocket connection managed in Zustand store. SSE managed as hook per active scan view.",
+    "api_layer": "Centralised axios instance with JWT interceptor. TanStack Query wraps all GET calls. Mutations use useMutation."
+  },
+  "package_json_dependencies": {
+    "dependencies": {
+      "react": "^18.3.0",
+      "react-dom": "^18.3.0",
+      "react-router-dom": "^6.23.0",
+      "@tanstack/react-query": "^5.40.0",
+      "zustand": "^4.5.0",
+      "recharts": "^2.12.0",
+      "lucide-react": "^0.383.0",
+      "axios": "^1.7.0",
+      "date-fns": "^3.6.0",
+      "clsx": "^2.1.0",
+      "tailwind-merge": "^2.3.0"
+    },
+    "devDependencies": {
+      "@vitejs/plugin-react": "^4.3.0",
+      "vite": "^5.3.0",
+      "tailwindcss": "^3.4.0",
+      "autoprefixer": "^10.4.0",
+      "postcss": "^8.4.0"
+    }
+  },
+  "file_structure": {
+    "frontend/src/": {
+      "main.jsx": "React root render \u2014 QueryClientProvider, Router, ThemeProvider",
+      "App.jsx": "Route definitions, auth guard, layout wrapper",
+      "api/": {
+        "client.js": "Axios instance \u2014 base URL, JWT interceptor, 401 redirect, 429 handling",
+        "auth.js": "login(), logout(), getMe() API functions",
+        "profiles.js": "getProfiles(), getProfile(), createProfile(), updateProfile(), deleteProfile(), getFields(), addField(), retireField()",
+        "brokers.js": "getBrokers(), getBroker(), updateBroker(), getPlaybooks(), activatePlaybook()",
+        "scans.js": "triggerScan(), getScans(), getScan(), getScanResults()",
+        "requests.js": "getRequests(), getRequest(), resubmitRequest(), getRequestHistory()",
+        "reports.js": "getExposureScore(), getFieldExposure(), getRelistings(), getAuditLog(), exportReport()",
+        "notifications.js": "getNotifications(), markRead(), markAllRead()",
+        "system.js": "getHealth(), getConfig(), getStats()"
+      },
+      "stores/": {
+        "authStore.js": "Zustand \u2014 token, user, role, login(), logout()",
+        "themeStore.js": "Zustand \u2014 theme (light|dark), toggle()",
+        "notificationStore.js": "Zustand \u2014 unreadCount, wsConnected, addNotification(), markRead()",
+        "scanProgressStore.js": "Zustand \u2014 activeScanRunId, progress {completed, total, latest}, setScanProgress(), clearProgress()"
+      },
+      "hooks/": {
+        "useAuth.js": "Wrapper around authStore with redirect logic",
+        "useWebSocket.js": "Manages WebSocket connection lifecycle, pushes events to notificationStore",
+        "useScanSSE.js": "SSE hook for /api/scans/{id}/progress \u2014 updates scanProgressStore",
+        "useTheme.js": "Wrapper around themeStore with Tailwind dark class toggling",
+        "usePagination.js": "Cursor pagination state manager for TanStack Query infinite queries"
+      },
+      "components/": {
+        "layout/": {
+          "AppLayout.jsx": "Root layout \u2014 sidebar + main content area",
+          "Sidebar.jsx": "Navigation sidebar \u2014 collapses to icons at 768px",
+          "TopBar.jsx": "Page title, notification bell, theme toggle, user menu",
+          "NotificationBell.jsx": "Badge with unreadCount, dropdown of recent notifications"
+        },
+        "common/": {
+          "StatusBadge.jsx": "Colour-coded status pill \u2014 props: status string \u2192 colour + label",
+          "ScoreGauge.jsx": "Animated circular gauge \u2014 props: score 0-100, size, showLabel",
+          "ScoreTrendChart.jsx": "Recharts LineChart \u2014 exposure score over time",
+          "DataTable.jsx": "Sortable/filterable table with pagination controls",
+          "EmptyState.jsx": "Illustrated empty state \u2014 props: icon, title, description, action",
+          "LoadingSkeleton.jsx": "Shimmer loading placeholder matching layout of content",
+          "ErrorBanner.jsx": "Inline error display with retry button",
+          "ConfirmDialog.jsx": "Modal confirmation dialog for destructive actions",
+          "CopyButton.jsx": "Copy-to-clipboard with check icon feedback",
+          "ExportButton.jsx": "Download PDF/CSV \u2014 triggers /api/reports/export"
+        },
+        "profile/": {
+          "ProfileCard.jsx": "Summary card \u2014 avatar initials, name, score gauge, pause toggle",
+          "ProfileFieldList.jsx": "Grouped field display \u2014 current + historical with effective dates",
+          "AddFieldForm.jsx": "Inline form to add new address/phone/email",
+          "ProfileDeleteDialog.jsx": "Confirmation with archive warning before deletion"
+        },
+        "broker/": {
+          "BrokerRow.jsx": "Table row \u2014 domain, category, method, captcha flag, last verified",
+          "BrokerStatusIcon.jsx": "Icon + tooltip for removal_method type",
+          "PlaybookVersionList.jsx": "Accordion showing playbook version history with activate button"
+        },
+        "scan/": {
+          "ScanProgressBar.jsx": "Live progress bar \u2014 reads scanProgressStore, latest broker name",
+          "ScanResultRow.jsx": "Table row \u2014 broker, status badge, confidence, screenshot link",
+          "ScanTriggerButton.jsx": "Button with dropdown \u2014 manual trigger options (all/profile/broker)"
+        },
+        "request/": {
+          "RequestStatusTimeline.jsx": "Vertical timeline of status transitions from request_status_log",
+          "RequestRow.jsx": "Table row \u2014 profile, broker, method badge, status badge, next action",
+          "FollowupBadge.jsx": "Pill showing followup_count / 3",
+          "ResubmitButton.jsx": "Triggers POST /api/requests/{id}/resubmit with confirmation"
+        },
+        "reports/": {
+          "ExposureScoreChart.jsx": "Multi-line Recharts chart \u2014 one line per profile over date range",
+          "FieldExposureBreakdown.jsx": "Grouped bar chart \u2014 exposed fields per broker",
+          "RelistingTable.jsx": "Table \u2014 broker, profile, original removal date, days until relist",
+          "AuditLogTable.jsx": "Paginated table \u2014 event_type, actor, entity, outcome, timestamp"
+        },
+        "onboarding/": {
+          "OnboardingWizard.jsx": "Multi-step wizard container with progress indicator",
+          "Step1AdminAccount.jsx": "Create admin username/password",
+          "Step2AddProfile.jsx": "Add first household member with PII fields",
+          "Step3EmailConfig.jsx": "SMTP/IMAP credentials test",
+          "Step4N8nCheck.jsx": "Ping n8n connectivity, show workflow status",
+          "Step5Complete.jsx": "Summary + trigger first scan button"
+        }
+      },
+      "pages/": {
+        "LoginPage.jsx": "Login form \u2014 calls authStore.login(), redirects to /dashboard",
+        "DashboardPage.jsx": "Household overview \u2014 stats cards, profile score gauges, recent events",
+        "ProfileDetailPage.jsx": "Profile-scoped view \u2014 fields, exposure score trend, request list",
+        "BrokerRegistryPage.jsx": "Searchable/filterable broker table with category tabs",
+        "RequestTrackerPage.jsx": "Paginated removal request list with status filter tabs",
+        "ReportsPage.jsx": "Tabbed report views \u2014 exposure score, field breakdown, re-listings",
+        "AuditLogPage.jsx": "Full-page paginated audit log with advanced filters",
+        "NotificationsPage.jsx": "Full notification list with mark-read controls",
+        "SystemHealthPage.jsx": "Service status grid, disk usage bars, queue depth",
+        "SettingsPage.jsx": "Profile management, system config display",
+        "OnboardingPage.jsx": "Wizard \u2014 shown automatically on first login if no profiles exist"
+      }
+    }
+  },
+  "routing": {
+    "router": "React Router v6 with createBrowserRouter",
+    "routes": [
+      {
+        "path": "/login",
+        "component": "LoginPage",
+        "auth_required": false
+      },
+      {
+        "path": "/onboarding",
+        "component": "OnboardingPage",
+        "auth_required": true,
+        "role": "admin"
+      },
+      {
+        "path": "/dashboard",
+        "component": "DashboardPage",
+        "auth_required": true,
+        "role": "any"
+      },
+      {
+        "path": "/profiles/:profileId",
+        "component": "ProfileDetailPage",
+        "auth_required": true,
+        "role": "any",
+        "guard": "admin sees all, member redirected if not own profile"
+      },
+      {
+        "path": "/brokers",
+        "component": "BrokerRegistryPage",
+        "auth_required": true,
+        "role": "any"
+      },
+      {
+        "path": "/requests",
+        "component": "RequestTrackerPage",
+        "auth_required": true,
+        "role": "any"
+      },
+      {
+        "path": "/reports",
+        "component": "ReportsPage",
+        "auth_required": true,
+        "role": "any"
+      },
+      {
+        "path": "/audit",
+        "component": "AuditLogPage",
+        "auth_required": true,
+        "role": "admin"
+      },
+      {
+        "path": "/notifications",
+        "component": "NotificationsPage",
+        "auth_required": true,
+        "role": "any"
+      },
+      {
+        "path": "/health",
+        "component": "SystemHealthPage",
+        "auth_required": true,
+        "role": "admin"
+      },
+      {
+        "path": "/settings",
+        "component": "SettingsPage",
+        "auth_required": true,
+        "role": "admin"
+      },
+      {
+        "path": "/",
+        "redirect": "/dashboard"
+      },
+      {
+        "path": "*",
+        "redirect": "/dashboard"
+      }
+    ],
+    "auth_guard": {
+      "component": "RequireAuth",
+      "logic": [
+        "Read token from authStore",
+        "If no token: redirect to /login with state.from = current location",
+        "If role check fails: redirect to /dashboard with toast error",
+        "After login: redirect to state.from or /dashboard"
+      ]
+    },
+    "onboarding_redirect": "After login, if admin role and profiles.length === 0: redirect to /onboarding"
+  },
+  "zustand_stores": {
+    "authStore": {
+      "file": "src/stores/authStore.js",
+      "state": {
+        "token": "string | null \u2014 JWT token, in-memory only",
+        "user": "{ id, username, role, linked_profile_id } | null",
+        "isAuthenticated": "boolean"
+      },
+      "actions": {
+        "login": "async(username, password) \u2192 calls POST /api/auth/login, sets token + user, returns void",
+        "logout": "async() \u2192 calls POST /api/auth/logout, clears token + user, clears TanStack Query cache",
+        "setUser": "(user) \u2192 sets user from getMe() response"
+      },
+      "persistence": "None \u2014 in-memory only. Token lost on page refresh by design."
+    },
+    "themeStore": {
+      "file": "src/stores/themeStore.js",
+      "state": {
+        "theme": "light | dark \u2014 default light"
+      },
+      "actions": {
+        "toggle": "Flips theme. Adds/removes 'dark' class on document.documentElement.",
+        "setTheme": "(theme) \u2192 explicit set"
+      },
+      "persistence": "localStorage key opendataremoval_theme \u2014 theme preference survives refresh"
+    },
+    "notificationStore": {
+      "file": "src/stores/notificationStore.js",
+      "state": {
+        "unreadCount": "integer \u2014 badge number on bell icon",
+        "recentNotifications": "array of last 10 notifications for dropdown preview",
+        "wsConnected": "boolean \u2014 WebSocket connection status indicator",
+        "wsError": "string | null"
+      },
+      "actions": {
+        "setUnreadCount": "(count) \u2192 set from GET /api/notifications response meta",
+        "addNotification": "(notification) \u2192 prepend to recentNotifications, increment unreadCount",
+        "markRead": "(id) \u2192 decrement unreadCount, update in recentNotifications",
+        "setWsStatus": "(connected, error) \u2192 update wsConnected + wsError"
+      }
+    },
+    "scanProgressStore": {
+      "file": "src/stores/scanProgressStore.js",
+      "state": {
+        "activeScanRunId": "UUID | null",
+        "completed": "integer",
+        "total": "integer",
+        "latestBrokerName": "string | null",
+        "latestStatus": "string | null",
+        "isComplete": "boolean"
+      },
+      "actions": {
+        "startTracking": "(scan_run_id, total) \u2192 initialise progress",
+        "updateProgress": "(completed, total, latest_result) \u2192 update from SSE event",
+        "completeScan": "() \u2192 set isComplete=true",
+        "clearProgress": "() \u2192 reset all to null/zero"
+      }
+    }
+  },
+  "tanstack_query": {
+    "setup": {
+      "queryClient_config": {
+        "defaultOptions": {
+          "queries": {
+            "staleTime": 30000,
+            "gcTime": 300000,
+            "retry": 2,
+            "refetchOnWindowFocus": true
+          }
+        }
+      }
+    },
+    "query_keys": {
+      "profiles": "['profiles']",
+      "profile": "['profiles', profileId]",
+      "profile_fields": "['profiles', profileId, 'fields']",
+      "brokers": "['brokers', filters]",
+      "broker": "['brokers', brokerId]",
+      "scans": "['scans', filters]",
+      "scan": "['scans', scanRunId]",
+      "scan_results": "['scans', scanRunId, 'results', filters]",
+      "requests": "['requests', filters]",
+      "request": "['requests', requestId]",
+      "request_history": "['requests', requestId, 'history']",
+      "exposure_score": "['reports', 'exposure-score', profileId, dateRange]",
+      "field_exposure": "['reports', 'field-exposure', profileId]",
+      "relistings": "['reports', 'relistings', filters]",
+      "audit_log": "['reports', 'audit-log', filters]",
+      "notifications": "['notifications', filters]",
+      "system_health": "['system', 'health']",
+      "system_stats": "['system', 'stats']"
+    },
+    "invalidation_strategy": {
+      "after_scan_trigger": "Invalidate ['scans'], ['system', 'stats']",
+      "after_request_resubmit": "Invalidate ['requests', requestId], ['requests']",
+      "on_websocket_notification": "Invalidate based on notification entity_type: exposure\u2192['reports'], request\u2192['requests'], system\u2192['system', 'health']",
+      "after_scan_complete_sse": "Invalidate ['scans'], ['reports', 'exposure-score'], ['system', 'stats']",
+      "after_profile_create": "Invalidate ['profiles']",
+      "after_field_add": "Invalidate ['profiles', profileId, 'fields']"
+    },
+    "infinite_queries": {
+      "applies_to": [
+        "requests (paginated)",
+        "audit_log (paginated)",
+        "notifications (paginated)",
+        "scan_results (paginated)"
+      ],
+      "cursor_extraction": "getNextPageParam: (lastPage) => lastPage.pagination.has_next ? lastPage.pagination.next_cursor : undefined"
+    }
+  },
+  "websocket_hook": {
+    "file": "src/hooks/useWebSocket.js",
+    "description": "Manages WebSocket lifecycle. Called once in App.jsx when authenticated.",
+    "connection_url": "ws://{window.location.host}/api/ws/notifications?token={token}",
+    "lifecycle": {
+      "connect": "On mount when token is set. Opens WebSocket. Sets wsConnected=true.",
+      "on_message": [
+        "Parse JSON event",
+        "If event.event === 'ping': send pong response",
+        "If event.event === 'notification': call notificationStore.addNotification(event.data)",
+        "Invalidate relevant TanStack Query keys based on notification_type"
+      ],
+      "on_error": "Set wsError in notificationStore. Attempt reconnect after 5 seconds.",
+      "on_close": "Set wsConnected=false. Attempt reconnect with exponential backoff: 5s, 10s, 30s, 60s.",
+      "disconnect": "On logout or token cleared: close WebSocket, clear reconnect timers."
+    },
+    "reconnect_max_attempts": 10,
+    "heartbeat": "Client responds to server ping with pong within 5 seconds or connection is considered stale"
+  },
+  "sse_hook": {
+    "file": "src/hooks/useScanSSE.js",
+    "description": "SSE stream for live scan progress. Used only in DashboardPage and ScanProgressBar when a scan is active.",
+    "connection_url": "/api/scans/{scanRunId}/progress?token={token}",
+    "implementation": {
+      "library": "Native EventSource API",
+      "on_message": [
+        "Parse event.data as JSON",
+        "If event === scan_progress: scanProgressStore.updateProgress(completed, total, latest_result)",
+        "If event === scan_complete: scanProgressStore.completeScan(), invalidate scan queries, close EventSource"
+      ],
+      "cleanup": "EventSource.close() on component unmount or when scanRunId changes"
+    },
+    "trigger": "Hook activates when scanProgressStore.activeScanRunId is non-null"
+  },
+  "axios_client": {
+    "file": "src/api/client.js",
+    "config": {
+      "baseURL": "'' \u2014 relative URLs, Nginx proxies /api/* to FastAPI",
+      "timeout": 30000,
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    },
+    "interceptors": {
+      "request": "Attach Authorization: Bearer {token} from authStore.token on every request",
+      "response_401": "Clear authStore token, redirect to /login with toast: Session expired. Please log in again.",
+      "response_429": "Show toast: Too many requests \u2014 please wait a moment., do not retry automatically",
+      "response_500": "Show toast: Something went wrong. The error has been logged., log to console"
+    }
+  },
+  "colour_system": {
+    "description": "Consistent colour-coded status system across all views",
+    "status_colours": {
+      "detected": {
+        "bg": "bg-gray-100 dark:bg-gray-800",
+        "text": "text-gray-700 dark:text-gray-300",
+        "label": "Detected"
+      },
+      "submitted": {
+        "bg": "bg-blue-100 dark:bg-blue-900",
+        "text": "text-blue-700 dark:text-blue-300",
+        "label": "Submitted"
+      },
+      "pending_confirmation": {
+        "bg": "bg-amber-100 dark:bg-amber-900",
+        "text": "text-amber-700 dark:text-amber-300",
+        "label": "Pending"
+      },
+      "verification_scheduled": {
+        "bg": "bg-purple-100 dark:bg-purple-900",
+        "text": "text-purple-700 dark:text-purple-300",
+        "label": "Verifying"
+      },
+      "confirmed_removed": {
+        "bg": "bg-green-100 dark:bg-green-900",
+        "text": "text-green-700 dark:text-green-300",
+        "label": "Removed"
+      },
+      "re_listed": {
+        "bg": "bg-orange-100 dark:bg-orange-900",
+        "text": "text-orange-700 dark:text-orange-300",
+        "label": "Re-listed"
+      },
+      "failed": {
+        "bg": "bg-red-100 dark:bg-red-900",
+        "text": "text-red-700 dark:text-red-300",
+        "label": "Failed"
+      },
+      "requires_manual": {
+        "bg": "bg-red-100 dark:bg-red-900",
+        "text": "text-red-700 dark:text-red-300",
+        "label": "Action Required"
+      }
+    },
+    "scan_result_colours": {
+      "found": "red",
+      "not_found": "green",
+      "inconclusive": "gray",
+      "captcha_blocked": "orange",
+      "rate_limited": "amber",
+      "error": "red"
+    },
+    "score_gauge_colours": {
+      "0_39": "text-red-500 \u2014 High exposure",
+      "40_69": "text-amber-500 \u2014 Moderate exposure",
+      "70_89": "text-blue-500 \u2014 Low exposure",
+      "90_100": "text-green-500 \u2014 Well protected"
+    },
+    "theme_tokens": {
+      "background": "bg-white dark:bg-gray-950",
+      "surface": "bg-gray-50 dark:bg-gray-900",
+      "border": "border-gray-200 dark:border-gray-800",
+      "text_primary": "text-gray-900 dark:text-gray-100",
+      "text_secondary": "text-gray-500 dark:text-gray-400",
+      "accent": "text-blue-600 dark:text-blue-400"
+    }
+  },
+  "pages": {
+    "DashboardPage": {
+      "route": "/dashboard",
+      "title": "Household Overview",
+      "layout": "2-column grid \u2014 left: stats + profile cards, right: recent activity feed",
+      "components": [
+        "StatsRow \u2014 4 cards: Active Exposures (red if > 0), Pending Requests (amber), Confirmed Removed (green), Re-listings (orange if > 0)",
+        "ProfileScoreGrid \u2014 ScoreGauge per profile with name, last scan time, paused badge if is_paused",
+        "ScanProgressBar \u2014 visible only when activeScanRunId is set, reads scanProgressStore",
+        "RecentActivityFeed \u2014 last 10 audit_log events in timeline style",
+        "ScanTriggerButton \u2014 floating action button for admin users"
+      ],
+      "tanstack_queries": [
+        "system_stats (30s refetch)",
+        "profiles (60s refetch)"
+      ],
+      "websocket": "Active \u2014 new_exposure and removal_confirmed events invalidate stats"
+    },
+    "ProfileDetailPage": {
+      "route": "/profiles/:profileId",
+      "title": "{profile.display_name}",
+      "layout": "3-section vertical \u2014 header, tabs, tab content",
+      "tabs": [
+        {
+          "label": "Overview",
+          "content": "ScoreTrendChart (90-day), current PII fields by type, exposure score stats"
+        },
+        {
+          "label": "Brokers",
+          "content": "DataTable of all brokers with this profile's current status \u2014 searchable, sortable by status"
+        },
+        {
+          "label": "Requests",
+          "content": "Paginated removal request list filtered to this profile. RequestStatusTimeline on row expand."
+        },
+        {
+          "label": "Fields",
+          "content": "ProfileFieldList grouped by type (addresses, phones, emails, etc.) with history toggle and AddFieldForm"
+        }
+      ],
+      "actions": [
+        "Edit display name",
+        "Pause/Resume automation toggle",
+        "Delete profile (admin only)"
+      ],
+      "tanstack_queries": [
+        "profile(profileId)",
+        "profile_fields(profileId)",
+        "exposure_score(profileId)",
+        "requests(profileId)"
+      ]
+    },
+    "RequestTrackerPage": {
+      "route": "/requests",
+      "title": "Removal Request Tracker",
+      "layout": "Filter bar + paginated table with expandable row detail",
+      "filter_controls": [
+        "Status tabs \u2014 All | Pending | Removed | Failed | Action Required",
+        "Profile dropdown filter",
+        "Broker search input",
+        "Method filter (web_form, email, legal_letter)",
+        "Re-listings only toggle"
+      ],
+      "table_columns": [
+        "Profile",
+        "Broker",
+        "Method badge",
+        "Status badge",
+        "Follow-ups pill",
+        "Next action",
+        "Submitted date",
+        "Actions"
+      ],
+      "row_expansion": "RequestStatusTimeline + mail classification if present + Resubmit button if failed/requires_manual",
+      "tanstack_query": "useInfiniteQuery(['requests', filters])",
+      "pagination": "Load more button \u2014 loads next cursor page"
+    },
+    "ReportsPage": {
+      "route": "/reports",
+      "title": "Reports & Analytics",
+      "layout": "Tab navigation across 4 report types",
+      "tabs": [
+        {
+          "label": "Exposure Score",
+          "content": "ExposureScoreChart \u2014 date range picker (7d/30d/90d/custom), profile toggle, score value annotations",
+          "export": "CSV and PDF"
+        },
+        {
+          "label": "Field Exposure",
+          "content": "FieldExposureBreakdown \u2014 profile selector, field type filter, grouped bar chart, summary table below",
+          "export": "CSV"
+        },
+        {
+          "label": "Re-listings",
+          "content": "RelistingTable \u2014 broker, profile, original confirmed date, re-list date, days_until_relisting, re-submission status",
+          "export": "CSV"
+        },
+        {
+          "label": "Audit Log",
+          "content": "AuditLogTable \u2014 event_type filter, actor_type filter, date range, paginated. Admin only.",
+          "export": "CSV and PDF"
+        }
+      ]
+    },
+    "SystemHealthPage": {
+      "route": "/health",
+      "title": "System Health",
+      "layout": "2-column \u2014 service status grid + storage/queue metrics",
+      "components": [
+        "ServiceStatusGrid \u2014 6 service cards (db, redis, worker, playwright, mailwatcher, n8n) with green/amber/red status dots",
+        "DiskUsageBars \u2014 volume bars for db_data, screenshots, logs with warning colour at 80%",
+        "QueueDepthMeter \u2014 Celery queue depth with amber warning at 50, red at 200",
+        "LastScanTime \u2014 last_scan_completed_at with relative time (e.g. 6 hours ago)",
+        "ImageVersionTable \u2014 service name, current image tag, update available badge"
+      ],
+      "tanstack_query": "system_health with 30s refetch interval",
+      "auto_refresh": "30-second refetch \u2014 health data stays current without manual refresh"
+    },
+    "OnboardingPage": {
+      "route": "/onboarding",
+      "title": "Welcome to OpenDataRemoval",
+      "layout": "Centred wizard card with step progress indicator",
+      "steps": [
+        {
+          "step": 1,
+          "title": "Create your admin account",
+          "description": "Your credentials were set during init.sh. This step confirms your account is active.",
+          "action": "GET /api/auth/me \u2014 display current user details. Button: Looks good, continue."
+        },
+        {
+          "step": 2,
+          "title": "Add your first household member",
+          "description": "Add yourself or a family member. You can add more profiles later.",
+          "action": "ProfileFieldForm with name, DOB, at least one address, phone, email required. POST /api/profiles."
+        },
+        {
+          "step": 3,
+          "title": "Verify email configuration",
+          "description": "OpenDataRemoval sends removal requests from your dedicated removal email address.",
+          "action": "Display REMOVAL_EMAIL from /api/system/config. Button: Send test email \u2192 POST /api/system/test-email. Show success/fail."
+        },
+        {
+          "step": 4,
+          "title": "Check n8n connectivity",
+          "description": "n8n discovers new data brokers each week. Let's make sure it's reachable.",
+          "action": "GET /api/system/health \u2014 show n8n status. If healthy: green check. Button: Continue. If degraded: show troubleshooting hint."
+        },
+        {
+          "step": 5,
+          "title": "You're all set",
+          "description": "OpenDataRemoval will now scan for your data daily and automatically request removal.",
+          "action": "Show summary: profiles added, brokers in registry, next scan time. Button: Run first scan now \u2192 POST /api/scans \u2192 redirect to /dashboard with scan progress bar active."
+        }
+      ],
+      "completion": "On finish: write onboarding_complete=true to localStorage. Redirect to /dashboard. Onboarding never shown again."
+    }
+  },
+  "score_gauge_component": {
+    "description": "Animated circular SVG gauge showing privacy score 0-100",
+    "props": {
+      "score": "number 0-100",
+      "size": "sm | md | lg (48px | 96px | 128px)",
+      "showLabel": "boolean",
+      "animate": "boolean \u2014 CSS transition on score change"
+    },
+    "implementation": {
+      "type": "SVG circle with stroke-dashoffset animation",
+      "circle_circumference": "2 * Math.PI * radius",
+      "stroke_offset": "(1 - score/100) * circumference",
+      "animation": "CSS transition: stroke-dashoffset 1s ease-out",
+      "colour": "Dynamic based on score range \u2014 see colour_system.score_gauge_colours"
+    }
+  },
+  "tailwind_config": {
+    "darkMode": "class",
+    "theme_extensions": {
+      "fontFamily": {
+        "sans": [
+          "Inter",
+          "system-ui",
+          "sans-serif"
+        ],
+        "mono": [
+          "JetBrains Mono",
+          "monospace"
+        ]
+      },
+      "colors": {
+        "brand": {
+          "50": "#eff6ff",
+          "500": "#2e75b6",
+          "900": "#1b3a5c"
+        }
+      }
+    },
+    "plugins": [
+      "@tailwindcss/forms",
+      "@tailwindcss/typography"
+    ]
+  },
+  "vite_config": {
+    "plugins": [
+      "@vitejs/plugin-react"
+    ],
+    "server": {
+      "proxy": {
+        "/api": "http://localhost:8000"
+      }
+    },
+    "build": {
+      "outDir": "dist",
+      "sourcemap": false
+    },
+    "note": "Proxy only used in local development \u2014 production uses Nginx proxy_pass"
+  },
+  "nginx_config_reference": "See DockerCompose Scaffold (DOC-4) for full nginx.conf \u2014 proxies /api/* and /api/ws to api:8000"
+}

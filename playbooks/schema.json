@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://homeguard.local/playbook/v1",
-  "title": "HomeGuard Broker Playbook",
+  "$id": "https://opendataremoval.local/playbook/v1",
+  "title": "OpenDataRemoval Broker Playbook",
   "description": "Structured playbook for automated data-broker discovery, scanning, and opt-out.",
   "type": "object",
   "required": ["canonical_domain", "phases", "complexity"],

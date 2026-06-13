@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "-v",
+    "--strict-markers",
+]
+
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

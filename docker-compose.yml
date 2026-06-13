@@ -1,18 +1,18 @@
-name: homeguard
+name: opendataremoval
 
 networks:
-  homeguard_net:
+  opendataremoval_net:
     driver: bridge
     internal: true
-  homeguard_egress:
+  opendataremoval_egress:
     driver: bridge
 
 volumes:
-  homeguard_db_data:
-  homeguard_redis_data:
-  homeguard_n8n_data:
-  homeguard_screenshots:
-  homeguard_logs:
+  opendataremoval_db_data:
+  opendataremoval_redis_data:
+  opendataremoval_n8n_data:
+  opendataremoval_screenshots:
+  opendataremoval_logs:
 
 services:
   db:
@@ -23,10 +23,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - homeguard_db_data:/var/lib/postgresql/data
+      - opendataremoval_db_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - homeguard_net
+      - opendataremoval_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -47,9 +47,9 @@ services:
     restart: unless-stopped
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
-      - homeguard_redis_data:/data
+      - opendataremoval_redis_data:/data
     networks:
-      - homeguard_net
+      - opendataremoval_net
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -100,14 +100,14 @@ services:
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
       - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY}
     volumes:
-      - homeguard_logs:/app/logs
+      - opendataremoval_logs:/app/logs
       - ./playbooks:/app/playbooks:ro
       - ./scripts:/app/scripts:ro
       - ./migrations:/app/migrations
       - ./tests:/app/tests:ro
     networks:
-      - homeguard_net
-      - homeguard_egress
+      - opendataremoval_net
+      - opendataremoval_egress
     depends_on:
       db:
         condition: service_healthy
@@ -161,12 +161,12 @@ services:
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
       - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY}
     volumes:
-      - homeguard_screenshots:/app/screenshots
-      - homeguard_logs:/app/logs
+      - opendataremoval_screenshots:/app/screenshots
+      - opendataremoval_logs:/app/logs
       - ./playbooks:/app/playbooks:ro
     networks:
-      - homeguard_net
-      - homeguard_egress
+      - opendataremoval_net
+      - opendataremoval_egress
     depends_on:
       db:
         condition: service_healthy
@@ -209,7 +209,7 @@ services:
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
       - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
     networks:
-      - homeguard_net
+      - opendataremoval_net
     depends_on:
       db:
         condition: service_healthy
@@ -235,11 +235,11 @@ services:
       - PLAYWRIGHT_MIN_DELAY_MS=${PLAYWRIGHT_MIN_DELAY_MS}
       - PLAYWRIGHT_MAX_DELAY_MS=${PLAYWRIGHT_MAX_DELAY_MS}
     volumes:
-      - homeguard_screenshots:/app/screenshots
+      - opendataremoval_screenshots:/app/screenshots
       - ./playbooks:/app/playbooks:ro
     networks:
-      - homeguard_net
-      - homeguard_egress
+      - opendataremoval_net
+      - opendataremoval_egress
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
       interval: 30s
@@ -276,8 +276,8 @@ services:
       - REMOVAL_EMAIL=${REMOVAL_EMAIL}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
     networks:
-      - homeguard_net
-      - homeguard_egress
+      - opendataremoval_net
+      - opendataremoval_egress
     depends_on:
       db:
         condition: service_healthy
@@ -299,7 +299,7 @@ services:
     ports:
       - "${HOST_BIND_ADDRESS}:3000:80"
     networks:
-      - homeguard_net
+      - opendataremoval_net
     depends_on:
       - api
     healthcheck:
@@ -326,17 +326,17 @@ services:
       - N8N_BASIC_AUTH_ACTIVE=true
       - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
       - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
-      - N8N_HOST=n8n.homeguard.local
+      - N8N_HOST=n8n.opendataremoval.local
       - N8N_PORT=5678
-      - WEBHOOK_URL=http://n8n.homeguard.local:5678/
+      - WEBHOOK_URL=http://n8n.opendataremoval.local:5678/
       - GENERIC_TIMEZONE=${TIMEZONE}
       - TZ=${TIMEZONE}
     volumes:
-      - homeguard_n8n_data:/home/node/.n8n
+      - opendataremoval_n8n_data:/home/node/.n8n
       - ./workflows:/home/node/.n8n/workflows:ro
     networks:
-      - homeguard_net
-      - homeguard_egress
+      - opendataremoval_net
+      - opendataremoval_egress
     depends_on:
       - api
     deploy:

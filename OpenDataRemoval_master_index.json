@@ -1,0 +1,268 @@
+{
+  "project": "OpenDataRemoval Privacy Platform",
+  "description": "Self-hosted personal data broker removal system \u2014 complete design documentation",
+  "version": "1.0",
+  "date": "May 2026",
+  "technology_stack": {
+    "deployment": "Docker Compose v2 \u2014 Ubuntu/Debian Linux",
+    "backend": "Python 3.11 / FastAPI / SQLAlchemy 2.x async",
+    "frontend": "React 18 + Vite + Tailwind CSS / Nginx Alpine",
+    "database": "PostgreSQL 15 with pgcrypto",
+    "task_queue": "Celery 5 + Redis 7",
+    "automation_browser": "Playwright for Python + Chromium",
+    "mail": "Mailgun SMTP/IMAP",
+    "discovery": "n8n workflow automation",
+    "auth": "JWT HS256 (PyJWT) + bcrypt",
+    "export": "WeasyPrint PDF + Python csv"
+  },
+  "documents": [
+    {
+      "id": "DOC-1",
+      "title": "Requirements Specification",
+      "file_docx": "OpenDataRemoval_Requirements_v1.0.docx",
+      "file_json": "opendataremoval_requirements.json",
+      "summary": "10 Functional Requirements (FR-1 to FR-10) and 10 Technical Requirements (TR-1 to TR-10) with full traceability matrix",
+      "key_decisions": [
+        "Fully automatic removal \u2014 no human approval needed",
+        "Daily scans",
+        "Multi-profile household (2-5 members)",
+        "Docker Compose single-host deployment",
+        "Versioned profile fields with historical address retention"
+      ]
+    },
+    {
+      "id": "DOC-2",
+      "title": "System Architecture",
+      "file_docx": "OpenDataRemoval_Architecture_v1.0.docx",
+      "file_json": "opendataremoval_architecture.json",
+      "summary": "9-service Docker Compose topology across 3 tiers: LAN-facing (api, frontend, n8n), data layer (PostgreSQL, Redis, Celery), automation (Playwright, Mailwatcher)",
+      "key_decisions": [
+        "Two Docker networks: opendataremoval_net (internal) + opendataremoval_egress (internet)",
+        "Playwright and Mailwatcher on egress network only",
+        "HOST_BIND_ADDRESS env var for Cloudflare Tunnel compatibility",
+        "8GB RAM with 4.4GB allocated across services"
+      ]
+    },
+    {
+      "id": "DOC-3",
+      "title": "Database Schema Design",
+      "file_docx": "OpenDataRemoval_Database_Schema_v1.0.docx",
+      "file_json": "opendataremoval_database_schema.json",
+      "summary": "34 tables across 9 schemas + archive schema. PostgreSQL 15 with pgcrypto PII encryption.",
+      "key_decisions": [
+        "profile_fields is EAV \u2014 unlimited phones, addresses, emails per profile",
+        "Versioned profile fields with effective_from/effective_to",
+        "One removal_request per detection event with parent_request_id for re-listing chains",
+        "Raw email body stored as TEXT in inbound_messages",
+        "Daily exposure score + per-broker snapshot in reporting schema",
+        "Archive schema populated before hard delete (8-step transaction)"
+      ]
+    },
+    {
+      "id": "DOC-4",
+      "title": "Docker Compose Scaffold",
+      "file_docx": "OpenDataRemoval_DockerCompose_Scaffold_v1.0.docx",
+      "file_json": "opendataremoval_docker_compose_scaffold.json",
+      "summary": "Complete docker-compose.yml, .env.example (all 30+ variables), init.sh (10-step setup), Dockerfiles, nginx.conf, postgres init.sql, .gitignore, and operational command reference",
+      "key_decisions": [
+        "Mailgun as recommended SMTP/IMAP provider with custom domain",
+        "Direct residential IP \u2014 PLAYWRIGHT_PROXY_URL as optional placeholder",
+        "Manual Docker image updates via docker compose pull",
+        "init.sh automates first-run from zero to running stack"
+      ]
+    },
+    {
+      "id": "DOC-5",
+      "title": "API Specification",
+      "file_docx": "OpenDataRemoval_API_Specification_v1.0.docx",
+      "file_json": "opendataremoval_api_specification.json",
+      "summary": "38 endpoints across 9 routers with OpenAPI-style schemas, custom error envelope, cursor pagination, WebSocket notifications, and SSE scan progress",
+      "key_decisions": [
+        "Custom error envelope with machine-readable error_code field",
+        "Cursor-based pagination on audit_log, scan_results, removal_requests only",
+        "SSE for scan progress (token in query param \u2014 EventSource limitation)",
+        "WebSocket for notifications (Redis pub/sub fanout)",
+        "HMAC-SHA256 for n8n webhook (not JWT)"
+      ]
+    },
+    {
+      "id": "DOC-6",
+      "title": "Broker Playbook JSON Schema",
+      "file_docx": "OpenDataRemoval_Broker_Playbook_Schema_v1.0.docx",
+      "file_json": "opendataremoval_broker_playbook_schema.json",
+      "summary": "JSON Schema spec for broker automation playbooks with 3 complexity levels, 16 action types, 16 token interpolation values, formal JSON Schema, and 3 complete worked examples",
+      "key_decisions": [
+        "Phase-based structure: search, identify, optout, verify, email_loop",
+        "Only 'submit' action skipped in dry_run mode",
+        "Confirmation detection: text match OR URL pattern \u2014 whichever fires first",
+        "CAPTCHA default strategy: manual (upgradeable to 2captcha/anticaptcha per broker)",
+        "Versioned playbooks \u2014 prior versions retained for rollback"
+      ]
+    },
+    {
+      "id": "DOC-7",
+      "title": "Celery Task Catalogue",
+      "file_json": "opendataremoval_celery_task_catalogue.json",
+      "summary": "21 Celery tasks across 6 groups (scanning, requests, maintenance, registry, notifications, reports) with inputs, outputs, retry policies, failure escalation, Beat schedule, and dependency map",
+      "key_decisions": [
+        "Batched parallel scan dispatch \u2014 10 brokers per batch via Celery chord",
+        "Chord callback triggers post-scan analytics automatically on batch completion",
+        "Retry up to max_retries then escalate to requires_manual status",
+        "CCPA/GDPR PDFs generated, stored on volume, and emailed as attachment",
+        "Hourly process_due_followups as safety net for missed ETA dispatches",
+        "All outbound actions write audit_log BEFORE executing"
+      ]
+    },
+    {
+      "id": "DOC-8",
+      "title": "Playwright Executor Specification",
+      "file_json": "opendataremoval_playwright_executor_spec.json",
+      "summary": "Full specification for the Playwright microservice \u2014 browser pool, async job API, action handlers, token resolution, error classification, screenshot storage, captcha handling, and worker integration pattern",
+      "key_decisions": [
+        "Pool of N BrowserContext objects (default 3) \u2014 shared Browser, isolated contexts per job",
+        "Async job pattern \u2014 worker POSTs and polls GET /jobs/{job_id} every 5 seconds",
+        "Structured error types with auto-screenshot on every failure",
+        "Structured subdirectory tree: screenshots/{profile_id}/{broker_id}/{timestamp}_{step}_{type}.png",
+        "Curated built-in UA pool per browser type \u2014 no runtime external dependency",
+        "Playwright service does not write to DB \u2014 all DB writes done by worker after receiving result"
+      ]
+    },
+    {
+      "id": "DOC-9",
+      "title": "Mailwatcher Service Specification",
+      "file_json": "opendataremoval_mailwatcher_spec.json",
+      "summary": "Full specification for the IMAP polling service \u2014 poll loop, email parser, keyword+regex classifier, request matcher, verification link extractor with automatic dispatch, task dispatcher, patterns.yml format, and deduplication",
+      "key_decisions": [
+        "Keyword pre-filter + regex two-stage classification engine",
+        "Sender domain + subject line combined for request matching",
+        "Move to IMAP Processed folder after processing \u2014 preserves for human review",
+        "Verification links automatically extracted and dispatched to Playwright via Celery",
+        "patterns.yml hot-reloaded each poll cycle \u2014 zero-downtime pattern updates",
+        "Deduplication via message_id_header prevents double-processing on restart"
+      ]
+    },
+    {
+      "id": "DOC-10",
+      "title": "n8n Workflow Specification",
+      "file_json": "opendataremoval_n8n_workflow_spec.json",
+      "summary": "5-workflow broker discovery system \u2014 orchestrator/sub-workflow architecture, Markdown/JSON/CSV parsing, full normalisation, HMAC-signed batch posting, retry logic, and workflow versioning",
+      "key_decisions": [
+        "Orchestrator (WF-001) triggers sub-workflows per source \u2014 failed sources don't block others",
+        "50 brokers per POST batch \u2014 avoids body size limits, natural retry unit",
+        "3 retries per source fetch + 3 retries per batch POST before continuing",
+        "n8n handles full normalisation \u2014 API receives clean validated broker schema",
+        "HMAC-SHA256 signed via Code node using Node.js crypto module",
+        "patterns.yml-style normalisation rules embedded in Code nodes"
+      ]
+    },
+    {
+      "id": "DOC-11",
+      "title": "Frontend Dashboard Specification",
+      "file_json": "opendataremoval_frontend_dashboard_spec.json",
+      "summary": "Full frontend spec \u2014 React 18 + Vite + Tailwind, Zustand stores, TanStack Query, WebSocket/SSE hooks, component tree, routing, colour system, page layouts, score gauge, onboarding wizard",
+      "key_decisions": [
+        "Zustand for client state (auth token, theme, notifications, scan progress)",
+        "TanStack Query for all server state with smart invalidation on WebSocket events",
+        "Polished dark/light mode with colour-coded status system and animated score gauges",
+        "Desktop-first 1280px+ with sidebar icon collapse at 768px",
+        "JWT stored in Zustand memory only \u2014 never localStorage",
+        "WebSocket managed in single hook, SSE per active scan view"
+      ]
+    },
+    {
+      "id": "DOC-12",
+      "title": "Security & Secrets Management Specification",
+      "file_json": "opendataremoval_security_spec.json",
+      "summary": "Threat model, secrets inventory (10 secrets with generation/rotation/compromise procedures), GPG-encrypted backup, manual rotation procedures including DB_ENCRYPTION_KEY PII re-encryption sequence, pg_dump + volume tar backup/restore, host hardening (UFW + fail2ban + checklist), and 12-point security verification checklist",
+      "key_decisions": [
+        ".env file + GPG-symmetric encrypted backup stored outside project directory",
+        "Manual rotation with documented per-secret procedures \u2014 no automated rotation",
+        "DB_ENCRYPTION_KEY rotation requires full backup + PII re-encryption migration script",
+        "pg_dump for consistent DB backup + volume tar for n8n and screenshots, all GPG-encrypted",
+        "UFW rules restrict LAN ports to home subnet only",
+        "fail2ban protects SSH and OpenDataRemoval login endpoint"
+      ]
+    },
+    {
+      "id": "DOC-13",
+      "title": "Testing & QA Specification",
+      "file_json": "opendataremoval_testing_qa_spec.json",
+      "summary": "pytest + Vitest + Playwright Test Runner \u2014 testcontainers PostgreSQL, fake Playwright service, aiosmtpd fake SMTP, E2E against live Docker Compose stack with fake broker server, full directory structure, unit/integration/E2E test specs, 13 named critical paths, 80%/75% coverage gates, MSW handlers, component and store tests",
+      "key_decisions": [
+        "pytest + Vitest + Playwright Test Runner (full stack coverage)",
+        "testcontainers PostgreSQL \u2014 real pgcrypto and UUID support",
+        "Fake Playwright FastAPI service + aiosmtpd for test doubles",
+        "Coverage targets: 80% backend, 75% frontend",
+        "10 named critical paths that must all pass regardless of coverage",
+        "Savepoint-based transaction rollback per test \u2014 no state leakage between tests",
+        "E2E tests run against dedicated test Docker Compose stack \u2014 never touches production volumes",
+        "Fake broker HTTP server for E2E testing \u2014 Playwright executor scans against it instead of real sites"
+      ]
+    },
+    {
+      "id": "DOC-14",
+      "title": "Operations & Runbook",
+      "file_json": "opendataremoval_operations_runbook.json",
+      "summary": "Daily/weekly/monthly/quarterly maintenance schedules, Docker + Alembic + playbook upgrade procedures, 14 symptom-based troubleshooting guides with component-level diagnosis steps, common operational tasks, and log location reference",
+      "key_decisions": [
+        "Symptom index maps to component diagnosis \u2014 organised by what operator sees, not by service",
+        "Weekly + monthly + quarterly maintenance cadence",
+        "Docker images + Python/Node deps + Alembic migration guide for upgrades",
+        "14 troubleshooting scenarios covering all realistic failure modes"
+      ]
+    },
+    {
+      "id": "DOC-15",
+      "title": "Implementation Checklist",
+      "file_json": "opendataremoval_implementation_checklist.json",
+      "summary": "11-phase implementation roadmap with 44 tasks, each with deliverables and acceptance criteria. References all 14 prior documents. Covers stack foundation through E2E verification and operations setup. Total: 22-32 developer days, 6-8 weeks solo.",
+      "key_decisions": [
+        "Phases ordered by dependency \u2014 DB before API, API before workers, workers before frontend",
+        "Every task has acceptance criteria \u2014 definition of done is unambiguous",
+        "13 critical paths must all pass for completion",
+        "Phases 4, 7, and parts of 8 can be parallelised"
+      ]
+    },
+    {
+      "id": "DOC-16",
+      "title": "Agent Sprint Plan",
+      "file_json": "opendataremoval_sprint_plan.json",
+      "summary": "7 sprints (39 tasks) with file-level deliverables, implementation notes, exact verify commands, and sprint gate checks. Covers full stack build from repo initialisation through live household onboarding.",
+      "key_decisions": [
+        "7 sprints: Foundation+DB, Core API, Playwright, Workers+Mailwatcher, Remaining API+Frontend base, Pages+E2E, Security+Ops",
+        "Each task specifies exact files_to_create, implementation_notes, and verify.commands",
+        "Sprint gate_checks block sprint progression until all pass",
+        "Critical path tests embedded as acceptance criteria throughout",
+        "All 13 CPs achieved across Sprints 2-6 before final sign-off"
+      ]
+    }
+  ],
+  "document_relationships": {
+    "requirements_to_architecture": "FR/TR map directly to services in architecture (TR-1 = service topology, TR-3 = api service, etc.)",
+    "architecture_to_schema": "All services read/write to PostgreSQL schemas defined in DOC-3",
+    "schema_to_api": "API endpoints read/write the tables defined in DOC-3 (profiles, scan_results, removal_requests, etc.)",
+    "compose_to_architecture": "DOC-4 docker-compose.yml implements the 9-service topology from DOC-2",
+    "playbook_to_scanning": "registry.broker_playbooks.playbook_json (DOC-3) validated against DOC-6 JSON Schema",
+    "api_to_playbook": "POST /api/brokers/{id}/playbooks/{pid}/activate (DOC-5) manages playbook lifecycle (DOC-6)"
+  },
+  "implementation_order": [
+    "1. Set up Docker Compose stack from DOC-4 \u2014 init.sh creates DB, migrates, seeds registry",
+    "2. Implement database schemas from DOC-3 using Alembic migrations",
+    "3. Build FastAPI API from DOC-5 endpoint specs \u2014 start with auth, profiles, brokers",
+    "4. Build Playwright microservice consuming playbooks defined in DOC-6",
+    "5. Build Mailwatcher IMAP poller and classifier",
+    "6. Build Celery worker tasks for scan dispatch and removal workflow",
+    "7. Configure n8n broker discovery workflows",
+    "8. Build React dashboard consuming DOC-5 API",
+    "9. Implement Celery tasks from DOC-7 \u2014 start with scan_broker, then execute_removal_request chain",
+    "10. Build playwright/ microservice from DOC-8 \u2014 start with pool.py and action handlers",
+    "11. Build mailwatcher/ service from DOC-9 \u2014 start with imap_client.py and classifier.py",
+    "12. Import n8n workflows from DOC-10 workflows/ files and run initial discovery to seed broker registry",
+    "13. Build React frontend from DOC-11 \u2014 start with authStore, api/client.js, AppLayout, then page by page",
+    "14. Apply security hardening from DOC-12 after stack is running \u2014 UFW, fail2ban, permissions, backup schedule",
+    "15. Write tests from DOC-13 alongside feature implementation \u2014 start with critical path tests CP-01 through CP-04",
+    "16. Follow DOC-15 Implementation Checklist phase by phase \u2014 the complete build guide"
+  ],
+  "total_documents": 15,
+  "total_json_size_kb": 419
+}

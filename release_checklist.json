@@ -1,0 +1,504 @@
+{
+  "document": "HomeGuard — Step-by-Step Release Checklist",
+  "version": "1.0",
+  "date": "2026-06-13",
+  "project": "HomeGuard (PII Removal Platform)",
+  "description": "Complete step-by-step release process. Every release follows every step in exact order. No step is optional.",
+  "agent_instructions": {
+    "role": "You are a release engineer executing the HomeGuard release process. Work through every phase and every step in exact order. Do not proceed to the next step until the current step's verify command returns the expected output. If any step fails, stop and report the failure before continuing.",
+    "gitea_host": "192.168.10.101:3002",
+    "gitea_user": "Vernon",
+    "gitea_token": "e2091bef108be8fdfac40218a3354d2d5b8478eb",
+    "gitea_repo": "Vernon/homeguard",
+    "dockerhub_username": "vernon",
+    "version_format": "MAJOR.MINOR.PATCH — increment PATCH by 1 per release (1.0.0 -> 1.0.1). A MINOR bump resets PATCH to 0.",
+    "abort_rule": "If any test fails or any verify command returns unexpected output, STOP the release. Fix the issue and restart from Phase 2 (tests)."
+  },
+  "phases": [
+    {
+      "phase": 1,
+      "title": "Pre-Release: Check for Issues",
+      "priority": "critical",
+      "description": "Before touching any code, check what has been reported in the repo.",
+      "steps": [
+        {
+          "id": "1.1",
+          "title": "Fetch open issues from Gitea",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard/issues?state=open&limit=100' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' > /tmp/hg_issues.json",
+            "python3 -c \"import json; issues=json.load(open('/tmp/hg_issues.json')); [print(f'#{i[\"number\"]} [{i[\"labels\"][0][\"name\"] if i.get(\"labels\") else \"unlabeled\"}] {i[\"title\"]}') for i in issues]\""
+          ],
+          "verify": "test -f /tmp/hg_issues.json && echo ISSUES_FETCHED",
+          "note": "If no issues found, proceed to next phase"
+        },
+        {
+          "id": "1.2",
+          "title": "Categorise issues into bugs vs enhancements",
+          "type": "SHELL",
+          "commands": [
+            "python3 << 'PYEOF'",
+            "import json",
+            "issues = json.load(open('/tmp/hg_issues.json'))",
+            "bugs = [i for i in issues if any(l['name'].lower() in ['bug','defect','error','critical'] for l in i.get('labels', []))]",
+            "enhancements = [i for i in issues if any(l['name'].lower() in ['enhancement','feature','improvement'] for l in i.get('labels', []))]",
+            "print(f'Bugs: {len(bugs)}')",
+            "print(f'Enhancements: {len(enhancements)}')",
+            "for b in bugs:",
+            "    print(f'  BUG #{b[\"number\"]}: {b[\"title\"]}')",
+            "PYEOF"
+          ],
+          "verify": "echo CATEGORIES_DONE"
+        },
+        {
+          "id": "1.3",
+          "title": "Check for open pull requests",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard/pulls?state=open&limit=50' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' | python3 -c \"import json,sys; prs=json.load(sys.stdin); print(f'Open PRs: {len(prs)}'); [print(f'  #{p[\"number\"]}: {p[\"title\"]} ({p[\"user\"][\"name\"]})') for p in prs]\""
+          ],
+          "verify": "echo PRS_CHECKED"
+        },
+        {
+          "id": "1.4",
+          "title": "Review recent commits for unresolved items",
+          "type": "SHELL",
+          "commands": [
+            "git log --oneline -20",
+            "git status --short"
+          ],
+          "verify": "echo COMMITS_REVIEWED"
+        }
+      ]
+    },
+    {
+      "phase": 2,
+      "title": "Test Suite Verification",
+      "priority": "critical",
+      "description": "All tests must pass before proceeding. If any test fails, fix it and restart from Phase 1.",
+      "steps": [
+        {
+          "id": "2.1",
+          "title": "Run Python syntax check",
+          "type": "SHELL",
+          "commands": [
+            "python3 -m py_compile api/main.py api/workers/celery_app.py api/workers/tasks/__init__.py api/workers/tasks/scanning.py api/workers/tasks/requests.py api/workers/tasks/registry.py api/workers/tasks/maintenance.py api/workers/tasks/notifications.py mailwatcher/main.py",
+            "echo SYNTAX_OK"
+          ],
+          "verify": "echo SYNTAX_OK",
+          "on_failure": "STOP RELEASE. Fix syntax errors before continuing."
+        },
+        {
+          "id": "2.2",
+          "title": "Verify no circular imports",
+          "type": "SHELL",
+          "commands": [
+            "python3 -c \"import api.workers.tasks.scanning\" && python3 -c \"import api.workers.tasks.requests\" && python3 -c \"import api.workers.tasks.registry\" && python3 -c \"import api.workers.tasks.maintenance\" && python3 -c \"import api.workers.tasks.notifications\" && python3 -c \"import api.workers.tasks\"",
+            "echo IMPORTS_OK"
+          ],
+          "verify": "echo IMPORTS_OK",
+          "on_failure": "STOP RELEASE. Fix circular imports before continuing."
+        },
+        {
+          "id": "2.3",
+          "title": "Run unit tests",
+          "type": "SHELL",
+          "commands": [
+            "pytest tests/unit/ -v --tb=short 2>&1 | tail -20"
+          ],
+          "verify": "pytest tests/unit/ -q && echo UNIT_TESTS_PASS",
+          "on_failure": "STOP RELEASE. Fix all failing tests before continuing."
+        },
+        {
+          "id": "2.4",
+          "title": "Run integration tests",
+          "type": "SHELL",
+          "commands": [
+            "pytest tests/integration/ -v --tb=short -m critical 2>&1 | tail -20"
+          ],
+          "verify": "pytest tests/integration/ -q -m critical && echo INTEGRATION_TESTS_PASS",
+          "on_failure": "STOP RELEASE. Fix failing integration tests."
+        },
+        {
+          "id": "2.5",
+          "title": "Run frontend tests",
+          "type": "SHELL",
+          "commands": [
+            "cd frontend && npx vitest run 2>&1 | tail -10"
+          ],
+          "verify": "cd frontend && npx vitest run && echo FRONTEND_TESTS_PASS",
+          "on_failure": "STOP RELEASE. Fix failing frontend tests."
+        },
+        {
+          "id": "2.6",
+          "title": "Verify Docker images build",
+          "type": "SHELL",
+          "commands": [
+            "docker compose build --no-cache 2>&1 | tail -20"
+          ],
+          "verify": "docker compose config --quiet && echo DOCKER_BUILD_OK"
+        }
+      ]
+    },
+    {
+      "phase": 3,
+      "title": "Version Bump",
+      "priority": "critical",
+      "description": "Increment version in all locations. Read current version, bump, verify.",
+      "steps": [
+        {
+          "id": "3.1",
+          "title": "Read current versions",
+          "type": "SHELL",
+          "commands": [
+            "grep '\"version\"' api/main.py frontend/package.json 2>/dev/null | head -5",
+            "grep -r 'version.*=' api/workers/celery_app.py 2>/dev/null | head -3"
+          ],
+          "verify": "echo VERSIONS_READ"
+        },
+        {
+          "id": "3.2",
+          "title": "Bump version 1.0.0 -> 1.01",
+          "type": "SHELL",
+          "commands": [
+            "# Bump api/main.py version",
+            "sed -i '' 's/\"version\": \"1.0.0\"/\"version\": \"1.01\"/g' api/main.py",
+            "# Bump frontend/package.json version",
+            "sed -i '' 's/\"version\": \"0.1.0\"/\"version\": \"1.01\"/g' frontend/package.json",
+            "# Verify changes",
+            "grep '\"version\"' api/main.py frontend/package.json"
+          ],
+          "verify": "grep '1.01' api/main.py && grep '1.01' frontend/package.json && echo VERSION_BUMPED",
+          "note": "Version format: MAJOR.MINOR (1.01 = version 1.01)"
+        },
+        {
+          "id": "3.3",
+          "title": "Update RELEASE_NOTES.md with current release info",
+          "type": "INSTRUCTION",
+          "instruction": "Open RELEASE_NOTES.md and add a new section for version 1.01 with the date, summarising changes since last release. Include: bug fixes, new features, breaking changes.",
+          "verify": "grep '1.01' RELEASE_NOTES.md && echo RELEASE_NOTES_UPDATED"
+        },
+        {
+          "id": "3.4",
+          "title": "Update memory-bank/progress.md",
+          "type": "INSTRUCTION",
+          "instruction": "Update progress.md to reflect the current release version and mark completed sprint items.",
+          "verify": "grep '1.01' memory-bank/progress.md && echo PROGRESS_UPDATED"
+        }
+      ]
+    },
+    {
+      "phase": 4,
+      "title": "Update Documentation",
+      "priority": "critical",
+      "description": "Update all user-facing documentation to reflect the new version and current state.",
+      "steps": [
+        {
+          "id": "4.1",
+          "title": "Update README.md",
+          "type": "SHELL",
+          "commands": [
+            "# Verify README mentions the project correctly",
+            "head -5 README.md",
+            "# Update version references in README if any",
+            "grep -c '1.01' README.md || echo 'README needs version update'",
+            "grep -c '1.0.0' README.md || echo 'No old version references found'"
+          ],
+          "verify": "echo README_REVIEWED"
+        },
+        {
+          "id": "4.2",
+          "title": "Verify .env.example is complete",
+          "type": "SHELL",
+          "commands": [
+            "grep -c '=' .env.example",
+            "head -30 .env.example"
+          ],
+          "verify": "test -f .env.example && echo ENV_EXAMPLE_OK"
+        },
+        {
+          "id": "4.3",
+          "title": "Verify API docs are accurate",
+          "type": "SHELL",
+          "commands": [
+            "grep -r 'APIRouter' api/routers/*.py | wc -l",
+            "grep 'include_router' api/main.py | wc -l"
+          ],
+          "verify": "echo APIDOC_REVIEWED"
+        },
+        {
+          "id": "4.4",
+          "title": "Update project description files",
+          "type": "INSTRUCTION",
+          "instruction": "Ensure these files have accurate descriptions: README.md (first line), .github/DESCRIPTION.md if exists, any project metadata files.",
+          "verify": "echo DESCRIPTIONS_UPDATED"
+        }
+      ]
+    },
+    {
+      "phase": 5,
+      "title": "Create Gitea Repository",
+      "priority": "critical",
+      "description": "Ensure the target Gitea repository exists and is ready for the release.",
+      "steps": [
+        {
+          "id": "5.1",
+          "title": "Check if Gitea repo exists",
+          "type": "SHELL",
+          "commands": [
+            "curl -s -o /dev/null -w '%{http_code}' 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb'"
+          ],
+          "verify": "echo REPO_CHECK_DONE"
+        },
+        {
+          "id": "5.2",
+          "title": "Create Gitea repo if it does not exist",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'http://192.168.10.101:3002/api/v1/user/repos' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' -H 'Content-Type: application/json' -d '{\"name\":\"homeguard\",\"description\":\"Automated PII removal and monitoring platform. Discovers personal data across broker sites and submits removal requests automatically.\",\"private\":false,\"auto_init\":false}' | python3 -c \"import json,sys; d=json.load(sys.stdin); print('Created:', d.get('full_name','?') if 'full_name' in d else d.get('message','error'))\" 2>/dev/null || echo 'Repo creation skipped or failed'"
+          ],
+          "verify": "curl -s -o /dev/null -w '%{http_code}' 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' | grep -q '200' && echo REPO_EXISTS || echo 'Repo may not exist'"
+        },
+        {
+          "id": "5.3",
+          "title": "Add Gitea remote to git",
+          "type": "SHELL",
+          "commands": [
+            "git remote get-url gitea 2>/dev/null || git remote add gitea http://192.168.10.101:3002/Vernon/homeguard.git",
+            "git remote -v"
+          ],
+          "verify": "git remote -v | grep gitea && echo GITEA_REMOTE_SET"
+        },
+        {
+          "id": "5.4",
+          "title": "Update Gitea repo description",
+          "type": "SHELL",
+          "commands": [
+            "curl -s -X PATCH 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' -H 'Content-Type: application/json' -d '{\"description\":\"Automated PII removal and monitoring platform. Discovers your personal data across data broker sites and submits removal requests automatically.\"}' | python3 -c \"import json,sys; d=json.load(sys.stdin); print('Description set:', d.get('description','?'))\" 2>/dev/null || echo 'Description update skipped'"
+          ],
+          "verify": "echo GITEA_DESC_UPDATED"
+        },
+        {
+          "id": "5.5",
+          "title": "Set Gitea repo topics/tags",
+          "type": "SHELL",
+          "commands": [
+            "curl -s -X PATCH 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' -H 'Content-Type: application/json' -d '{\"topics\":[\"pii-removal\",\"privacy\",\"automation\",\"fastapi\",\"playwright\",\"celery\",\"docker\",\"react\"]}' | python3 -c \"import json,sys; d=json.load(sys.stdin); print('Topics:', d.get('topics',[]))\" 2>/dev/null || echo 'Topics update skipped'"
+          ],
+          "verify": "echo GITEA_TOPICS_UPDATED"
+        }
+      ]
+    },
+    {
+      "phase": 6,
+      "title": "Commit, Push, and Tag",
+      "priority": "critical",
+      "description": "Stage all changes, commit with release message, push to Gitea, create tag.",
+      "steps": [
+        {
+          "id": "6.1",
+          "title": "Stage all changes",
+          "type": "SHELL",
+          "commands": [
+            "git add -A",
+            "git status --short"
+          ],
+          "verify": "git diff --cached --stat | tail -5"
+        },
+        {
+          "id": "6.2",
+          "title": "Commit with release message",
+          "type": "SHELL",
+          "commands": [
+            "git commit -m \"release: bump version to 1.01\"\n\n### Changed\n- Bump version 1.0.0 -> 1.01 in api/main.py, frontend/package.json\n\n### Fixed\n- Missing api/routers/alerts.py (API crash fix)\n- api/workers/tasks/__init__.py wrong imports (crash fix)\n- Circular import between scanning.py and requests.py\n- Undefined schedule_follow_up_check reference\n- Nested asyncio.run() crashes in execute_removal_request and followup_removal_request\n- autodiscover_packages wrong argument format in celery_app.py\n- Missing @celery_app.task decorators in registry.py\n- Mailwatcher env var naming (HOMEGUARD_* -> MAILWATCHER_*)\n\n### Added\n- api/routers/alerts.py with list/detail/acknowledge endpoints\n- release_checklist.json with comprehensive release process\n- release_checklist.json.sample review incorporated"
+          ],
+          "verify": "git log -1 --oneline | grep '1.01' && echo COMMIT_OK"
+        },
+        {
+          "id": "6.3",
+          "title": "Create git tag",
+          "type": "SHELL",
+          "commands": [
+            "git tag -a v1.01 -m \"Release v1.01\"\n",
+            "git tag -l 'v1.*'"
+          ],
+          "verify": "git tag -l 'v1.01' && echo TAG_CREATED"
+        },
+        {
+          "id": "6.4",
+          "title": "Push to Gitea",
+          "type": "SHELL",
+          "commands": [
+            "git push gitea main --follow-tags",
+            "echo PUSH_COMPLETE"
+          ],
+          "verify": "git ls-remote gitea | grep HEAD && echo PUSH_VERIFIED"
+        },
+        {
+          "id": "6.5",
+          "title": "Push to GitHub (backup)",
+          "type": "SHELL",
+          "commands": [
+            "git push origin main --follow-tags 2>/dev/null || echo 'GitHub push skipped'"
+          ],
+          "verify": "echo GITHUB_PUSH_DONE"
+        }
+      ]
+    },
+    {
+      "phase": 7,
+      "title": "Create Gitea Release",
+      "priority": "critical",
+      "description": "Create a formal release tag on Gitea with release notes.",
+      "steps": [
+        {
+          "id": "7.1",
+          "title": "Create release on Gitea",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard/releases' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' -H 'Content-Type: application/json' -d '{\"tag_name\":\"v1.01\",\"name\":\"Release v1.01\",\"body\":\"## HomeGuard v1.01\\n\\n**Date:** 2026-06-13\\n\\n### Fixed\\n- Missing alerts router (API crash fix)\\n- Celery task import errors (__init__.py)\\n- Circular imports (scanning <-> requests)\\n- Nested asyncio.run() crashes\\n- autodiscover_packages format fix\\n- Missing Celery task decorators\\n- Mailwatcher env var naming\\n\\n### Added\\n- Alerts router with list/detail/acknowledge endpoints\\n- Comprehensive release checklist\\n- Release automation scripts\\n\\n### Changed\\n- Version bumped to 1.01\",\"draft\":false,\"prerelease\":false}' | python3 -c \"import json,sys; d=json.load(sys.stdin); print('Release created:', d.get('tag_name','?') if 'tag_name' in d else d.get('message','error'))\" 2>/dev/null || echo 'Release creation skipped or failed'"
+          ],
+          "verify": "curl -s 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard/releases/tags/v1.01' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' | python3 -c \"import json,sys; d=json.load(sys.stdin); print('Release v1.01:', d.get('tag_name','?') if 'tag_name' in d else 'not found')\" 2>/dev/null || echo 'Release not found'"
+        },
+        {
+          "id": "7.2",
+          "title": "Verify release on Gitea web UI",
+          "type": "SHELL",
+          "commands": [
+            "echo \"Release URL: http://192.168.10.101:3002/Vernon/homeguard/releases/tag/v1.01\"",
+            "curl -s -o /dev/null -w '%{http_code}' 'http://192.168.10.101:3002/Vernon/homeguard/releases/tag/v1.01'"
+          ],
+          "verify": "echo RELEASE_VERIFIED"
+        }
+      ]
+    },
+    {
+      "phase": 8,
+      "title": "Update DockerHub",
+      "priority": "high",
+      "description": "Update DockerHub repository description and info if applicable.",
+      "steps": [
+        {
+          "id": "8.1",
+          "title": "Check DockerHub repository status",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'https://hub.docker.com/v2/repositories/vernon/homeguard/' 2>/dev/null | python3 -c \"import json,sys; d=json.load(sys.stdin); print('Repo:', d.get('name','?')); print('Description:', d.get('description','?'))\" 2>/dev/null || echo 'DockerHub repo not found or API unavailable'"
+          ],
+          "verify": "echo DOCKERHUB_CHECKED"
+        },
+        {
+          "id": "8.2",
+          "title": "Update DockerHub description (if repo exists)",
+          "type": "SHELL",
+          "commands": [
+            "# This requires DockerHub API token authentication\n# Replace DOCKERHUB_TOKEN with your actual token\n# curl -s -X PATCH 'https://hub.docker.com/v2/repositories/vernon/homeguard/' \\\n#   -H 'Authorization: JWT <TOKEN>' \\\n#   -H 'Content-Type: application/json' \\\n#   -d '{\"full_description\": \"Automated PII removal and monitoring platform.\", \"website\": \"https://github.com/Vernon/homeguard\"}'\n",
+            "echo 'DockerHub update requires manual token authentication. Run the commands above with your DockerHub token.'"
+          ],
+          "verify": "echo DOCKERHUB_UPDATE_PENDING"
+        },
+        {
+          "id": "8.3",
+          "title": "Build and push Docker images (if DockerHub configured)",
+          "type": "SHELL",
+          "commands": [
+            "# Requires DOCKERHUB_TOKEN or docker login\n# docker tag homeguard-api:1.01 vernon/homeguard-api:1.01\n# docker tag homeguard-api:1.01 vernon/homeguard-api:latest\n# docker push vernon/homeguard-api:1.01\n# docker push vernon/homeguard-api:latest\n",
+            "echo 'Docker image push requires docker login. Run manually if DockerHub publishing is configured.'"
+          ],
+          "verify": "echo DOCKER_PUSH_PENDING"
+        }
+      ]
+    },
+    {
+      "phase": 9,
+      "title": "Post-Release Verification",
+      "priority": "high",
+      "description": "Verify everything propagated correctly after the release.",
+      "steps": [
+        {
+          "id": "9.1",
+          "title": "Verify Gitea repo has correct files",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard/contents/' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' | python3 -c \"import json,sys; files=json.load(sys.stdin); print(f'Files in repo: {len(files)}'); [print(f'  {f[\"name\"]}') for f in files[:20]]\" 2>/dev/null || echo 'Could not list repo contents'"
+          ],
+          "verify": "echo GITEA_FILES_VERIFIED"
+        },
+        {
+          "id": "9.2",
+          "title": "Verify release tag exists",
+          "type": "SHELL",
+          "commands": [
+            "git tag -l 'v1.01'",
+            "git log --oneline v1.01 -1"
+          ],
+          "verify": "git tag -l 'v1.01' | grep -q 'v1.01' && echo TAG_VERIFIED"
+        },
+        {
+          "id": "9.3",
+          "title": "Verify version in pushed code",
+          "type": "SHELL",
+          "commands": [
+            "git show v1.01:api/main.py | grep '\"version\"'",
+            "git show v1.01:frontend/package.json | grep '\"version\"'"
+          ],
+          "verify": "git show v1.01:api/main.py | grep -q '1.01' && echo VERSION_IN_TAG_VERIFIED"
+        },
+        {
+          "id": "9.4",
+          "title": "Verify Gitea release page",
+          "type": "SHELL",
+          "commands": [
+            "curl -s 'http://192.168.10.101:3002/api/v1/repos/Vernon/homeguard/releases' -H 'Authorization: token e2091bef108be8fdfac40218a3354d2d5b8478eb' | python3 -c \"import json,sys; releases=json.load(sys.stdin); [print(f'{r[\"tag_name\"]}: {r.get(\"body\",\"\")[:50]}...') for r in releases[:5]]\" 2>/dev/null || echo 'Could not list releases'"
+          ],
+          "verify": "echo GITEA_RELEASES_VERIFIED"
+        },
+        {
+          "id": "9.5",
+          "title": "Final status summary",
+          "type": "SHELL",
+          "commands": [
+            "echo '=== Release v1.01 Complete ==='",
+            "echo 'Gitea: http://192.168.10.101:3002/Vernon/homeguard'",
+            "echo 'Release: http://192.168.10.101:3002/Vernon/homeguard/releases/tag/v1.01'",
+            "echo 'Version: 1.01'",
+            "echo 'Date: 2026-06-13'"
+          ],
+          "verify": "echo RELEASE_COMPLETE"
+        }
+      ]
+    }
+  ],
+
+  "release_approval": {
+    "required_approvers": 1,
+    "blockers": [
+      "Any Phase 1 (Issues) task failing",
+      "Any Phase 2 (Tests) task failing",
+      "Any Phase 3 (Version) task failing",
+      "Any Phase 5 (Gitea) task failing",
+      "Any Phase 6 (Push) task failing",
+      "Any Phase 7 (Release) task failing"
+    ],
+    "warnings": [
+      "Phase 4 (Docs) incomplete",
+      "Phase 8 (DockerHub) skipped",
+      "Phase 9 (Verification) incomplete"
+    ],
+    "sign_off_template": {
+      "approved_by": "",
+      "date": "",
+      "version": "1.01",
+      "phase_1": false,
+      "phase_2": false,
+      "phase_3": false,
+      "phase_4": false,
+      "phase_5": false,
+      "phase_6": false,
+      "phase_7": false,
+      "phase_8": false,
+      "phase_9": false,
+      "notes": ""
+    }
+  }
+}

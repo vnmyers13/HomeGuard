@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import engine
-from routers import auth, profiles, brokers, webhooks, scans
+from routers import auth, profiles, brokers, webhooks, scans, alerts
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HomeGuard API",
     description="Privacy Protection Platform API",
-    version="1.0.0",
+    version="1.01",
     lifespan=lifespan,
 )
 
@@ -70,7 +70,7 @@ async def health_check():
                 "database": "up",
                 "redis": "up",
             },
-            "version": "1.0.0",
+            "version": "1.01",
         },
     }
 
@@ -80,6 +80,7 @@ app.include_router(profiles.router, prefix="/api")
 app.include_router(brokers.router, prefix="/api")
 app.include_router(webhooks.router, prefix="/api")
 app.include_router(scans.router, prefix="/api")
+app.include_router(alerts.router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn

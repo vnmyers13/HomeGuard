@@ -1,0 +1,247 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 System Architecture",
+  "version": "1.0",
+  "deployment_model": "Docker Compose v2 single-host Ubuntu/Debian Linux",
+  "services": [
+    {
+      "name": "api",
+      "image": "python:3.11-slim (FastAPI)",
+      "lan_port": "8000",
+      "networks": [
+        "opendataremoval_net",
+        "opendataremoval_egress"
+      ],
+      "memory_limit": "512MB",
+      "purpose": "Core REST API, authentication, business logic, audit logging, n8n webhook receiver"
+    },
+    {
+      "name": "frontend",
+      "image": "node + nginx:alpine (React SPA)",
+      "lan_port": "3000",
+      "networks": [
+        "opendataremoval_net"
+      ],
+      "memory_limit": "256MB",
+      "purpose": "Dashboard SPA served via Nginx, proxies /api/* to api service"
+    },
+    {
+      "name": "db",
+      "image": "postgres:15-alpine",
+      "lan_port": null,
+      "networks": [
+        "opendataremoval_net"
+      ],
+      "memory_limit": "768MB",
+      "purpose": "Primary PostgreSQL data store \u2014 all application data, audit log"
+    },
+    {
+      "name": "redis",
+      "image": "redis:7-alpine",
+      "lan_port": null,
+      "networks": [
+        "opendataremoval_net"
+      ],
+      "memory_limit": "256MB",
+      "purpose": "Celery task broker and result backend"
+    },
+    {
+      "name": "worker",
+      "image": "python:3.11-slim (Celery worker)",
+      "lan_port": null,
+      "networks": [
+        "opendataremoval_net",
+        "opendataremoval_egress"
+      ],
+      "memory_limit": "512MB",
+      "purpose": "Background job execution \u2014 scans, removals, follow-ups, verification re-scans"
+    },
+    {
+      "name": "beat",
+      "image": "python:3.11-slim (Celery Beat)",
+      "lan_port": null,
+      "networks": [
+        "opendataremoval_net"
+      ],
+      "memory_limit": "128MB",
+      "purpose": "Daily scan scheduler, nightly housekeeping tasks"
+    },
+    {
+      "name": "playwright",
+      "image": "python:3.11 + Playwright/Chromium",
+      "internal_port": "8001",
+      "networks": [
+        "opendataremoval_net",
+        "opendataremoval_egress"
+      ],
+      "memory_limit": "1024MB",
+      "purpose": "Headless Chromium automation microservice \u2014 broker scanning and form submission"
+    },
+    {
+      "name": "mailwatcher",
+      "image": "python:3.11-slim",
+      "lan_port": null,
+      "networks": [
+        "opendataremoval_net",
+        "opendataremoval_egress"
+      ],
+      "memory_limit": "256MB",
+      "purpose": "IMAP inbox poller \u2014 classifies inbound broker responses"
+    },
+    {
+      "name": "n8n",
+      "image": "n8nio/n8n",
+      "lan_port": "5678",
+      "networks": [
+        "opendataremoval_net",
+        "opendataremoval_egress"
+      ],
+      "memory_limit": "768MB",
+      "purpose": "Broker discovery workflow automation \u2014 weekly registry updates"
+    }
+  ],
+  "networks": {
+    "opendataremoval_net": {
+      "driver": "bridge",
+      "internal": true,
+      "description": "All services communicate here. db, redis, beat, playwright have no host port bindings."
+    },
+    "opendataremoval_egress": {
+      "driver": "bridge",
+      "internal": false,
+      "description": "Internet-capable network for api, worker, playwright, mailwatcher, n8n only"
+    }
+  },
+  "volumes": [
+    {
+      "name": "opendataremoval_db_data",
+      "used_by": [
+        "db"
+      ],
+      "contents": "All PostgreSQL application data"
+    },
+    {
+      "name": "opendataremoval_redis_data",
+      "used_by": [
+        "redis"
+      ],
+      "contents": "Celery queue, Beat schedule state"
+    },
+    {
+      "name": "opendataremoval_n8n_data",
+      "used_by": [
+        "n8n"
+      ],
+      "contents": "Workflow definitions, credentials, execution history"
+    },
+    {
+      "name": "opendataremoval_screenshots",
+      "used_by": [
+        "playwright",
+        "worker"
+      ],
+      "contents": "Evidence screenshots \u2014 purged per SCREENSHOT_RETENTION_DAYS"
+    },
+    {
+      "name": "opendataremoval_logs",
+      "used_by": [
+        "api",
+        "worker"
+      ],
+      "contents": "Structured JSON application logs \u2014 rotated per LOG_RETENTION_DAYS"
+    }
+  ],
+  "data_flows": [
+    {
+      "id": 1,
+      "from": "Browser (LAN)",
+      "to": "Frontend :3000",
+      "description": "User accesses dashboard over LAN"
+    },
+    {
+      "id": 2,
+      "from": "Frontend",
+      "to": "API :8000",
+      "direction": "bidirectional",
+      "description": "Nginx proxies /api/* and WebSocket /api/ws to FastAPI"
+    },
+    {
+      "id": 3,
+      "from": "API",
+      "to": "Redis",
+      "description": "Dispatches Celery background tasks"
+    },
+    {
+      "id": 4,
+      "from": "Redis",
+      "to": "Celery worker",
+      "description": "Delivers queued task messages to workers"
+    },
+    {
+      "id": 5,
+      "from": "Celery Beat",
+      "to": "Celery worker",
+      "description": "Fires daily scan schedule and nightly housekeeping"
+    },
+    {
+      "id": 6,
+      "from": "Celery worker",
+      "to": "Playwright :8001",
+      "description": "Sends scan and form-submission tasks"
+    },
+    {
+      "id": 7,
+      "from": "Playwright",
+      "to": "Broker sites (external)",
+      "description": "Headless Chromium scans and opt-out submissions"
+    },
+    {
+      "id": 8,
+      "from": "Mailwatcher",
+      "to": "Email server (external)",
+      "direction": "bidirectional",
+      "description": "IMAP polling + SMTP sending via opendataremoval_egress"
+    },
+    {
+      "id": 9,
+      "from": "n8n",
+      "to": "Discovery feeds (external)",
+      "description": "Weekly broker discovery workflow"
+    },
+    {
+      "id": 10,
+      "from": "n8n",
+      "to": "API :8000 /api/webhooks/n8n",
+      "description": "POSTs normalised broker payloads \u2014 HMAC-SHA256 authenticated"
+    },
+    {
+      "id": 11,
+      "from": "All services",
+      "to": "PostgreSQL",
+      "description": "All application state via SQLAlchemy async ORM"
+    }
+  ],
+  "cloudflare_tunnel_migration": {
+    "steps": [
+      "Install cloudflared on host",
+      "Create tunnel routing domain to http://localhost:3000 (dashboard) and http://localhost:8000 (API)",
+      "Set HOST_BIND_ADDRESS=127.0.0.1 in .env",
+      "Restart stack: docker compose up -d",
+      "Verify tunnel works \u2014 direct LAN IP:port access refused"
+    ],
+    "code_changes_required": false,
+    "note": "Entire migration is a single .env variable change and stack restart"
+  },
+  "memory_allocation_8gb_host": {
+    "api": "512MB",
+    "frontend": "256MB",
+    "db": "768MB",
+    "redis": "256MB",
+    "worker": "512MB",
+    "beat": "128MB",
+    "playwright": "1024MB",
+    "mailwatcher": "256MB",
+    "n8n": "768MB",
+    "total_allocated": "4480MB",
+    "os_headroom": "3720MB"
+  }
+}

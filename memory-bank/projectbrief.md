@@ -1,8 +1,8 @@
-# HomeGuard - Privacy Protection Platform
+# OpenDataRemoval - Privacy Protection Platform
 
 ## Project Brief
 
-HomeGuard is an automated privacy protection platform that scans data broker websites for user PII, submits removal requests (web forms, emails, legal letters), and verifies/completes opt-out workflows.
+OpenDataRemoval is an automated privacy protection platform that scans data broker websites for user PII, submits removal requests (web forms, emails, legal letters), and verifies/completes opt-out workflows.
 
 ## Core Goals
 1. **Scan**: Automatically discover where a user's PII appears across 50+ data broker sites

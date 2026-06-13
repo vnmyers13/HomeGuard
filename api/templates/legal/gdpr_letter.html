@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GDPR Erasure Request</title>
+  <style>
+    body { font-family: 'Times New Roman', Times, serif; line-height: 1.8; color: #000; max-width: 650px; margin: 0 auto; padding: 40px; }
+    .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 20px; margin-bottom: 30px; }
+    .section { margin: 25px 0; }
+    .section-title { font-weight: bold; text-decoration: underline; margin-bottom: 10px; }
+    .info-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    .info-table td { padding: 8px 0; vertical-align: top; }
+    .label { font-weight: bold; width: 180px; }
+    .signature { margin-top: 50px; }
+    .footer { margin-top: 40px; font-size: 11px; color: #666; border-top: 1px solid #ccc; padding-top: 15px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1 style="margin: 0; font-size: 28px;">GENERAL DATA PROTECTION REGULATION</h1>
+    <h2 style="margin: 5px 0 0 0; font-size: 22px;">RIGHT TO ERASURE REQUEST</h2>
+    <p style="margin: 5px 0 0 0; color: #666;">Pursuant to Regulation (EU) 2016/679, Article 17</p>
+  </div>
+
+  <p><strong>Date:</strong> {{request_date}}</p>
+  <p><strong>Request ID:</strong> {{request_id}}</p>
+
+  <div class="section">
+    <p><strong>To:</strong></p>
+    <p>
+      {{broker_name}}<br>
+      {% if broker_address %}{{broker_address}}{% endif %}<br>
+      Data Protection Officer<br>
+      Privacy Compliance Department
+    </p>
+  </div>
+
+  <div class="section">
+    <p><strong>Re: Formal Request for Erasure of Personal Data under GDPR Article 17</strong></p>
+  </div>
+
+  <div class="section">
+    <p>Dear Data Protection Officer,</p>
+    <p>I am writing to exercise my right to erasure under Article 17 of the General Data Protection Regulation ("GDPR"), Regulation (EU) 2016/679.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">I. DATA SUBJECT IDENTIFICATION</div>
+    <table class="info-table">
+      <tr>
+        <td class="label">Full Legal Name:</td>
+        <td>{{profile_full_name}}</td>
+      </tr>
+      {% if profile_address %}
+      <tr>
+        <td class="label">Address:</td>
+        <td>{{profile_address}}</td>
+      </tr>
+      {% endif %}
+      {% if profile_email %}
+      <tr>
+        <td class="label">Email:</td>
+        <td>{{profile_email}}</td>
+      </tr>
+      {% endif %}
+      {% if profile_phone %}
+      <tr>
+        <td class="label">Phone:</td>
+        <td>{{profile_phone}}</td>
+      </tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-title">II. PERSONAL DATA LOCATED ON YOUR PLATFORM</div>
+    <p>The following personal data about me is currently processed by your organization and accessible on your website:</p>
+    <p style="background-color: #f5f5f5; padding: 10px; border-left: 3px solid #000;">
+      <strong>URL:</strong> {{listing_url}}
+    </p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">III. LEGAL BASIS FOR ERASURE</div>
+    <p>Pursuant to Article 17(1) of the GDPR, personal data shall be erased where:</p>
+    <ul>
+      <li><strong>Article 17(1)(a):</strong> The personal data are no longer necessary in relation to the purposes for which they were collected;</li>
+      <li><strong>Article 17(1)(b):</strong> The data subject withdraws consent on which the processing is based;</li>
+      <li><strong>Article 17(1)(e):</strong> The personal data have to be erased for compliance with a legal obligation in Union or Member State law.</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-title">IV. SPECIFIC REQUEST</div>
+    <p>I hereby request that you:</p>
+    <ol>
+      <li><strong>ERASE</strong> all personal data about me without undue delay;</li>
+      <li><strong>NOTIFY</strong> all controllers who are processing this data of my request (Article 17(2));</li>
+      <li><strong>CONFIRM</strong> erasure within 30 days of receipt;</li>
+      <li><strong>CESSE</strong> any further processing or dissemination of my personal data.</li>
+    </ol>
+  </div>
+
+  <div class="section">
+    <div class="section-title">V. RESPONSE REQUIRED</div>
+    <p>Pursuant to Article 12(3) of the GDPR, you are required to respond without undue delay and within <strong>one month</strong> of receipt. Failure to comply may result in:</p>
+    <ul>
+      <li>Complaint to the relevant Supervisory Authority (Article 77)</li>
+      <li>Right to an effective judicial remedy (Article 78-79)</li>
+      <li>Administrative fines up to €20 million or 4% of global annual turnover (Article 83)</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <p>All rights under the GDPR and applicable national law are expressly reserved.</p>
+  </div>
+
+  <div class="signature">
+    <p>Sincerely,</p>
+    <br>
+    <p>
+      <strong>OpenDataRemoval Privacy Protection Services</strong><br>
+      On behalf of {{profile_full_name}}<br>
+    </p>
+  </div>
+
+  <div class="footer">
+    <p><strong>NOTICE:</strong> This is a legal document under the GDPR. Failure to respond within 30 days may result in regulatory action.</p>
+    <p style="text-align: center; margin-top: 20px;">*** END OF DOCUMENT ***</p>
+  </div>
+</body>
+</html>

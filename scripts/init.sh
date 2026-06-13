@@ -117,14 +117,14 @@ asyncio.run(main())
 }
 
 start_all_services() {
-    log_info "Starting all HomeGuard services..."
+    log_info "Starting all OpenDataRemoval services..."
     cd "$PROJECT_ROOT"
     docker compose up -d
 
     echo ""
     log_ok "All services started!"
     echo ""
-    log_info "HomeGuard is running:"
+    log_info "OpenDataRemoval is running:"
     echo "  API:       http://localhost:8000"
     echo "  Docs:      http://localhost:8000/docs"
     echo "  Frontend:  http://localhost:3000"
@@ -140,7 +140,7 @@ start_all_services() {
 main() {
     echo ""
     log_info "========================================"
-    log_info "  HomeGuard Environment Bootstrap"
+    log_info "  OpenDataRemoval Environment Bootstrap"
     log_info "========================================"
     echo ""
     validate_env
@@ -151,7 +151,7 @@ main() {
     create_admin
     start_all_services
     echo ""
-    log_ok "HomeGuard setup complete! 🎉"
+    log_ok "OpenDataRemoval setup complete! 🎉"
     echo ""
 }
 

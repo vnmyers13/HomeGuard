@@ -1,5 +1,5 @@
 """
-HomeGuard Security Module
+OpenDataRemoval Security Module
 =========================
 JWT authentication, password hashing, and OAuth2 configuration.
 

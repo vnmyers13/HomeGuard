@@ -1,8 +1,7 @@
-# HomeGuard Privacy Platform
+# OpenDataRemoval Privacy Platform
 
 Automated personal data removal and monitoring platform. Discovers your personal data across data broker sites and submits removal requests automatically.
 
-> **Status:** v0.2.0 — Sprint 2 Complete! Full-stack application with React dashboard, authentication, profiles API, broker catalog, and scan management. [Release Notes](RELEASE_NOTES.md)
 
 ---
 
@@ -87,7 +86,7 @@ docker compose logs -f api
 docker compose run --rm api alembic upgrade head
 
 # Database shell
-docker compose exec db psql -U homeguard homeguard
+docker compose exec db psql -U opendataremoval opendataremoval
 
 # Health check
 curl http://localhost:8000/api/system/health
@@ -99,7 +98,7 @@ curl http://localhost:8000/api/system/health
 ## Project Structure
 
 ```
-HomeGuard/
+OpenDataRemoval/
 ├── api/                    # FastAPI backend
 │   ├── main.py             # Application entry point
 │   ├── database.py         # Async SQLAlchemy setup
@@ -224,7 +223,7 @@ All list responses include `_links` metadata for API discoverability:
 
 ## Broker Playbooks
 
-HomeGuard supports **28 data brokers** out of the box:
+OpenDataRemoval supports **28 data brokers** out of the box:
 
 - Spokeo, Whitepages, BeenVerified, InstantCheckMate, TruthFinder
 - PeopleFinder, PeopleFinders, Radaris, Intelius

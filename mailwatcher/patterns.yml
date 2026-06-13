@@ -1,0 +1,73 @@
+# Email Classification Patterns
+# Externalized patterns for the two-stage email classifier.
+# Stage 1: Pre-filter keywords (fast rejection of unrelated emails)
+# Stage 2: Detailed regex patterns for classification
+
+prefilter_keywords:
+  confirmed_removal:
+    - removed
+    - deleted
+    - delist
+    - unlist
+    - taken down
+    - opt-out
+    - opt out
+    - listing
+    - profile
+    - record
+  rejection:
+    - denied
+    - rejected
+    - declined
+    - unable
+    - cannot
+    - invalid
+    - expired
+  info_requested:
+    - information
+    - details
+    - required
+    - needed
+    - provide
+    - submit
+    - verify
+    - confirm
+    - identity
+  verification_link:
+    - verify
+    - confirmation
+    - click
+    - link
+    - otp
+    - code
+    - validate
+
+patterns:
+  confirmed_removal:
+    - "has\\s+been\\s+(?:removed|deleted|taken\\s+down)"
+    - "(?:successfully?\\s+)?(?:removed|de-listed|delist(?:ed|\\.?))"
+    - "(?:listing|profile|record)\\s+(?:is\\s+no\\s+longer|has?\\s+been)\\s+(?:available|visible)"
+    - "(?:un)?listed\\s+(?:now|currently)"
+    - "your?\\s+information\\s+(?:has?\\s+been\\s+)?(?:removed|is\\s+no\\s+longer)"
+    - "(?:opt-?out|removal)\\s+(?:request\\s+)?(?:has?\\s+been\\s+)?(?:completed|processed|fulfilled)"
+    - "(?:results|page)\\s+(?:no\\s+longer\\s+)?(?:shows|contains)"
+    - "(?:private|hidden)\\s+(?:now|by\\s+default)"
+  rejection:
+    - "(?:request|claim)\\s+(?:denied|rejected|declined)"
+    - "(?:un)?able\\s+to\\s+(?:process|fulfill|complete)\\s+(?:this\\s+)?request"
+    - "(?:does?\\s+not|no\\s+longer)\\s+(?:support|provide|offer)\\s+(?:opt-?out|removal)"
+    - "(?:invalid|expired)\\s+(?:request|ticket|case)"
+    - "cannot\\s+be\\s+(?:removed|processed|fulfilled)"
+  info_requested:
+    - "(?:additional\\s+)?(?:information|details)\\s+(?:is\\s+)?(?:required|needed)"
+    - "(?:please\\s+)?(?:provide|submit)\\s+(?:the\\s+)?(?:following\\s+)?(?:documents?|information)"
+    - "(?:verify\\s+)?(?:your?\\s+)?(?:identity|ownership)"
+    - "(?:please\\s+)?(?:confirm|verify)\\s+(?:your?\\s+)?(?:name|address|dob)"
+    - "(?:we\\s+need|i\\s+need)\\s+(?:more\\s+)?(?:information|details)"
+    - "(?:please\\s+)?(?:reply\\s+with|include)\\s+(?:the\\s+)?(?:following)"
+  verification_link:
+    - "(?:click\\s+(?:the\\s+)?(?:following\\s+)?link\\s+to\\s+(?:verify|confirm))"
+    - "(?:verify|confirm)\\s+(?:your?\\s+)?(?:email|request)\\s*(?:by\\s+)?clicking"
+    - "(?:https?://\\S{4,200}(?:verify|confirm|validate|auth|token))"
+    - "(?:otp|verification\\s+code)\\s+(?:is\\s+)\\b\\d{4,8}\\b"
+    - "(?:please\\s+)?(?:verify|confirm)\\s+(?:your?\\s+)?email\\s*(?:address\\s*)?by"

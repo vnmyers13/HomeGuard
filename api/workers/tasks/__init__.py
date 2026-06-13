@@ -1,4 +1,44 @@
-# Tasks package
-from . import scanning, maintenance, registry
+"""Celery task modules for OpenDataRemoval background jobs."""
 
-__all__ = ["scanning", "maintenance", "registry"]
+from api.workers.tasks.scanning import (
+    scan_broker,
+    dispatch_daily_scan,
+)
+
+from api.workers.tasks.registry import (
+    check_broker_opt_out_urls,
+    upsert_broker_from_discovery,
+)
+
+from api.workers.tasks.maintenance import (
+    cleanup_old_scans,
+    purge_expired_screenshots,
+)
+
+from api.workers.tasks.requests import (
+    execute_removal_request,
+    hourly_followup_check,
+)
+
+from api.workers.tasks.notifications import (
+    send_scan_complete_notification,
+    send_daily_digest,
+)
+
+__all__ = [
+    # Scanning tasks
+    "scan_broker",
+    "dispatch_daily_scan",
+    # Registry tasks
+    "check_broker_opt_out_urls",
+    "upsert_broker_from_discovery",
+    # Maintenance tasks
+    "cleanup_old_scans",
+    "purge_expired_screenshots",
+    # Removal request tasks
+    "execute_removal_request",
+    "hourly_followup_check",
+    # Notification tasks
+    "send_scan_complete_notification",
+    "send_daily_digest",
+]

@@ -1,0 +1,275 @@
+{
+  "name": "OpenDataRemoval Opt-Out Orchestration",
+  "description": "Orchestrates opt-out/deletion requests to data brokers: trigger → Playwright execution → confirmation tracking → result aggregation",
+  "nodes": [
+    {
+      "id": "optout_trigger",
+      "name": "Opt-Out Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "optout-trigger",
+        "responseMode": "responseNode",
+        "options": {
+          "respondWith": "allItems"
+        }
+      },
+      "notes": "Receives opt-out trigger with profile_id, target brokers, and member data."
+    },
+    {
+      "id": "validate_optout",
+      "name": "Validate Opt-Out Payload",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.profile_id }}",
+              "operation": "isNotEmpty"
+            }
+          ],
+          "array": [
+            {
+              "value1": "={{ $json.body.target_brokers }}",
+              "operation": "notEmpty"
+            }
+          ]
+        }
+      },
+      "notes": "Validates profile_id and target_brokers list."
+    },
+    {
+      "id": "split_optout_brokers",
+      "name": "Split Opt-Out Brokers",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "notes": "Processes each broker opt-out sequentially."
+    },
+    {
+      "id": "execute_optout",
+      "name": "Execute Opt-Out via Playwright",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [660, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.PLAYWRIGHT_SERVICE_URL || 'http://playwright:8001' }}/jobs",
+        "body": "={\n  \"playbook\": {{ $json.broker_domain }},\n  \"tokens\": {{ JSON.stringify($json.body.tokens) }},\n  \"mode\": \"opt_out\"\n}",
+        "options": {
+          "redirect": true
+        }
+      },
+      "notes": "Submits opt-out job to Playwright executor with opt_out mode."
+    },
+    {
+      "id": "poll_optout_job",
+      "name": "Poll Opt-Out Job",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [880, 0],
+      "parameters": {
+        "waitTime": 15,
+        "generateItem": false
+      },
+      "notes": "Polls Playwright job status every 15 seconds."
+    },
+    {
+      "id": "fetch_optout_result",
+      "name": "Fetch Opt-Out Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1100, 0],
+      "parameters": {
+        "httpMethod": "GET",
+        "url": "={{ $env.PLAYWRIGHT_SERVICE_URL || 'http://playwright:8001' }}/jobs/{{ $json.job_id }}"
+      },
+      "notes": "Retrieves opt-out job result from Playwright service."
+    },
+    {
+      "id": "classify_optout_result",
+      "name": "Classify Opt-Out Result",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1320, 0],
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "confirmed"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "pending_email"
+            },
+            {
+              "condition": {
+                "string": {
+                  "value1": "={{ $json.status }}",
+                  "operation": "equals"
+                }
+              },
+              "outputId": "failed"
+            }
+          ]
+        }
+      },
+      "notes": "Classifies opt-out result: confirmed, pending email confirmation, or failed."
+    },
+    {
+      "id": "store_optout_result",
+      "name": "Store Opt-Out Result",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1540, -220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/optout-results",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Stores confirmed opt-out result."
+    },
+    {
+      "id": "pending_email_handler",
+      "name": "Pending Email Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1540, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/pending-optouts",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Queues for email confirmation tracking via Mailwatcher."
+    },
+    {
+      "id": "optout_error",
+      "name": "Opt-Out Error Handler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1540, 220],
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "={{ $env.HOMEGUARD_API_URL || 'http://api:8000' }}/internal/optout-errors",
+        "body": "={{ JSON.stringify($json) }}"
+      },
+      "notes": "Records failed opt-out attempts for retry."
+    },
+    {
+      "id": "aggregate_optout",
+      "name": "Aggregate Opt-Out Results",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1760, 0],
+      "parameters": {
+        "mode": "combine"
+      },
+      "notes": "Aggregates results from all broker opt-outs."
+    },
+    {
+      "id": "optout_response",
+      "name": "Opt-Out Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1980, 0],
+      "parameters": {
+        "responseBody": "={{ JSON.stringify({ status: 'completed', optout_results: $json }) }}",
+        "options": {}
+      },
+      "notes": "Returns aggregated opt-out results."
+    }
+  ],
+  "connections": {
+    "optout_trigger": {
+      "main": [
+        [{ "node": "validate_optout", "type": "main", "index": 0 }]
+      ]
+    },
+    "validate_optout": {
+      "main": [
+        [{ "node": "split_optout_brokers", "type": "main", "index": 0 }]
+      ]
+    },
+    "split_optout_brokers": {
+      "main": [
+        [{ "node": "execute_optout", "type": "main", "index": 0 }],
+        [{ "node": "aggregate_optout", "type": "main", "index": 0 }]
+      ]
+    },
+    "execute_optout": {
+      "main": [
+        [{ "node": "poll_optout_job", "type": "main", "index": 0 }]
+      ]
+    },
+    "poll_optout_job": {
+      "main": [
+        [{ "node": "fetch_optout_result", "type": "main", "index": 0 }]
+      ]
+    },
+    "fetch_optout_result": {
+      "main": [
+        [{ "node": "classify_optout_result", "type": "main", "index": 0 }]
+      ]
+    },
+    "classify_optout_result": {
+      "main": [
+        [{ "node": "store_optout_result", "type": "main", "index": 0 }],
+        [{ "node": "pending_email_handler", "type": "main", "index": 0 }],
+        [{ "node": "optout_error", "type": "main", "index": 0 }]
+      ]
+    },
+    "store_optout_result": {
+      "main": [
+        [{ "node": "split_optout_brokers", "type": "main", "index": 1 }]
+      ]
+    },
+    "pending_email_handler": {
+      "main": [
+        [{ "node": "split_optout_brokers", "type": "main", "index": 1 }]
+      ]
+    },
+    "optout_error": {
+      "main": [
+        [{ "node": "split_optout_brokers", "type": "main", "index": 1 }]
+      ]
+    },
+    "aggregate_optout": {
+      "main": [
+        [{ "node": "optout_response", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "saveDataErrorExecution": "all",
+    "errorWorkflow": "error_handler_workflow"
+  },
+  "staticData": {
+    "description": "Opt-out orchestration workflow for data broker deletion requests.",
+    "version": "1.0.0",
+    "environment_vars": [
+      "HOMEGUARD_API_URL",
+      "PLAYWRIGHT_SERVICE_URL"
+    ]
+  }
+}

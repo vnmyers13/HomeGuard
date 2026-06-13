@@ -45,6 +45,54 @@ def cleanup_old_scans(max_age_days: int = 90):
         logger.error("Scan cleanup failed: %s", e)
 
 
+@celery_app.task(name="maintenance.purge_expired_screenshots")
+def purge_expired_screenshots(max_age_days: int = 30):
+    """Remove screenshot files that are older than max_age_days."""
+    import os
+    import glob
+
+    logger.info("Purging screenshots older than %d days", max_age_days)
+    screenshot_dir = os.environ.get("SCREENSHOT_DIR", "/tmp/screenshots")
+    cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+    purged = 0
+
+    try:
+        for filepath in glob.glob(os.path.join(screenshot_dir, "*.png")):
+            mtime = datetime.fromtimestamp(os.path.getmtime(filepath))
+            if mtime < cutoff:
+                os.remove(filepath)
+                purged += 1
+        logger.info("Purged %d screenshot files", purged)
+    except Exception as e:
+        logger.error("Screenshot purge failed: %s", e)
+
+    return purged
+
+
+@celery_app.task(name="maintenance.compute_disk_usage")
+def compute_disk_usage():
+    """Compute disk usage stats for screenshots and playbooks directories."""
+    import os
+    import shutil
+
+    dirs = {
+        "screenshots": os.environ.get("SCREENSHOT_DIR", "/tmp/screenshots"),
+        "playbooks": os.environ.get("PLAYBOOK_DIR", "./playbooks"),
+    }
+    stats = {}
+
+    for label, path in dirs.items():
+        try:
+            total = shutil.disk_usage(path).used
+            stats[label] = total
+        except Exception as e:
+            logger.error("Disk usage check failed for %s: %s", label, e)
+            stats[label] = 0
+
+    logger.info("Disk usage stats: %s", stats)
+    return stats
+
+
 @celery_app.task(name="maintenance.health_check")
 def health_check():
     """Periodic health check for all services."""

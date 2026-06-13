@@ -1,44 +1,27 @@
 # Active Context
 
-**Last Updated**: 2026-05-09
+**Last Updated**: 2026-05-14
+
+## Current Sprint: Sprint 4 (COMPLETED ✅)
+
+**Sprint 4 Goal**: Full scan→exposure→removal→verification pipeline end-to-end. Mailwatcher classifying emails with two-stage classifier. All critical paths CP-02 through CP-05 and CP-09 passing.
+
+### Sprint 4 Task Breakdown (5 tasks) - ALL COMPLETE
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| S4-T1 | Celery app config, Beat schedule, task infrastructure | COMPLETE ✅ | Worker config, 4 Beat entries, base task class |
+| S4-T2 | Scan tasks — dispatch chain, scan_broker, analytics chord | COMPLETE ✅ | Full scan pipeline with exposure detection |
+| S4-T3 | Removal request tasks — web form, email, legal letter | COMPLETE ✅ | 4 removal methods + follow-up escalation |
+| S4-T4 | Mailwatcher — two-stage classifier, patterns, link extractor | COMPLETE ✅ | Keyword prefilter + regex classification |
+| S4-T5 | Maintenance, registry, notification tasks | COMPLETE ✅ | Purge, disk usage, broker health, notifications |
+
+## Sprint 3 Status: COMPLETE ✅
+Sprint 3 delivered the complete Playwright Executor microservice with browser pool, 16 action handlers, playbook execution engine, async job API. Mailwatcher email pipeline with IMAP client, classifier, notifier. Celery integration wiring run_scan_task to Playwright. 192 total tests (151 Playwright + 41 E2E).
+
+**Sprint 3 Score: 9/9 tasks completed (100%)**
 
 ## Sprint 2 Status: COMPLETE
-
-Sprint 2 delivered a fully functional authentication system, core REST API (auth, profiles, brokers, webhooks, scans), and a React dashboard with 6 pages. All code is written, routers registered, and frontend routing configured.
-
-## Sprint 3 Focus: Playwright Executor & Task Orchestration
-
-Sprint 3 implements the core data broker interaction engine:
-1. **Playwright Executor** ✅ - COMPLETE. Browser automation with playbook-driven navigation
-2. **Celery Task Integration** - Connect scan trigger API → Celery task → Playwright executor
-3. **Mailwatcher** - Email monitoring for confirmation/response processing
-4. **n8n Workflows** - Workflow orchestration between services
-5. **E2E Tests** - Playwright-based end-to-end test suite
-
-### Playwright Executor Service (Complete)
-The executor service is fully implemented with 8 modules:
-- `playwright/models.py` - Pydantic models (ExecutionState, JobRequest, PlaybookStep, StepResult, HealthStatus, etc.)
-- `playwright/pool.py` - Browser pool with anti-detection flags, health monitoring, startup sequence
-- `playwright/token_resolver.py` - Token/cookie resolver with template engine and variable substitution
-- `playwright/actions.py` - 16 action handlers (navigate, fill_form, click, wait, screenshot, submit, select, hover, scroll, type_text, check_text, uncheck_text, download, conditional, loop, execute_js)
-- `playwright/screenshot.py` - Smart screenshot utility with full/page/element capture
-- `playwright/executor.py` - PlaybookExecutor engine (~500 lines) with confirmation system, CAPTCHA detection, error classification
-- `playwright/main.py` - FastAPI service with 3 endpoints (POST /jobs, GET /jobs/{id}, GET /health)
-- `playwright/user_agents.json` - Chrome/Edge user agent pool for rotation
-
-## Recent Changes (Sprint 3)
-- Implemented complete Playwright Executor service with browser pool, token resolver, 16 action handlers, playbook executor engine
-- Added anti-detection measures: random viewport/user agent, WebDriver flag override, human-like delays
-- Built confirmation system with CAPTCHA detection and error classification (retryable/fatal/partial)
-- Integrated FastAPI endpoints for job submission, status tracking, and health monitoring
-
-## Recent Changes (Sprint 2)
-- Created all FastAPI routers: auth, profiles, brokers, webhooks, scans
-- Implemented service layer for each domain
-- Built React frontend with protected routing, 6 pages, Zustand auth store
-- Configured Docker Compose with 5 services (api, frontend, postgres, redis, celery-worker)
-- Wrote unit tests for auth, profiles, brokers, webhooks
-- Created Alembic migration for initial schema
+Sprint 2 delivered authentication, core REST API (auth, profiles, brokers, webhooks, scans), and React dashboard with 6 pages. All code written, routers registered, frontend routing configured. 45+ unit tests passing with 80%+ coverage.
 
 ## Important Patterns & Preferences
 - **API responses**: Always wrapped in `{ success: bool, data?: ..., error_code?: string, message?: string }`
@@ -50,12 +33,12 @@ The executor service is fully implemented with 8 modules:
 
 ## Key Learnings
 - npm not available on host machine - frontend builds inside Docker containers
-- Scan trigger API creates DB record but Celery task dispatch is deferred to Sprint 3
+- Scan trigger API creates DB record but Celery task dispatch was deferred to Sprint 3
 - Logout requires Redis connectivity for token blacklisting
+- Playwright service runs on port 8001 within Docker network
 
-## Next Immediate Steps
-1. Write unit tests for Playwright executor (test_executor.py, test_pool.py, test_actions.py)
-2. Wire Celery `run_scan_task` to call Playwright executor via HTTP or direct import
-3. Add scan result capture and E-E-A-I evidence storage
-4. Implement Mailwatcher email processing pipeline
-5. Docker integration testing for playwright service
+## Next Immediate Steps - Sprint 5
+- **S5-T1**: Frontend removal request tracking page
+- **S5-T2**: Legal letter PDF generation and download
+- **S5-T3**: Real-time scan progress via WebSocket
+- **S5-T4**: Performance optimization for large households (100+ profiles)

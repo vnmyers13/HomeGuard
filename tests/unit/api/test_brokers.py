@@ -52,9 +52,10 @@ class TestBrokerSchemas:
         from schemas.broker import BrokerResponse
 
         broker = BrokerResponse(
-            id=1,
+            id="1",
             domain="spokeo.com",
             name="Spokeo",
+            is_active=True,
             status="active",
         )
         assert broker.domain == "spokeo.com"
@@ -75,8 +76,8 @@ class TestBrokerSchemas:
         from schemas.broker import BrokerResponse, BrokerListResponse
 
         brokers = [
-            BrokerResponse(id=1, domain="spokeo.com", name="Spokeo", status="active"),
-            BrokerResponse(id=2, domain="whitepages.com", name="WhitePages", status="active"),
+            BrokerResponse(id="1", domain="spokeo.com", name="Spokeo", is_active=True, status="active"),
+            BrokerResponse(id="2", domain="whitepages.com", name="WhitePages", is_active=True, status="active"),
         ]
         response = BrokerListResponse(brokers=brokers, total=2)
         assert len(response.brokers) == 2

@@ -1,17 +1,23 @@
-"""Pytest configuration for HomeGuard tests.
+"""Pytest configuration for OpenDataRemoval tests.
 
-Ensures /app (the API root inside the container) is on sys.path
-so that imports like 'from services.xxx' and 'from schemas.xxx' resolve.
+Ensures project root and API root are on sys.path so that imports like
+'from api.models.xxx', 'from mailwatcher.xxx', and 'from gw_playwright.xxx'
+resolve correctly both locally and inside Docker containers.
 """
 import sys
 import os
 
-# Add the API root (/app inside container, or project root's api/ dir locally)
-_app_path = os.path.join(os.path.dirname(__file__), "..", "api")
-if _app_path not in sys.path:
-    sys.path.insert(0, _app_path)
+# Project root (for mailwatcher/, gw_playwright/ module imports)
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
-# Also support running from inside the Docker container where tests are at /app/tests
+# Add the API root for 'from api.xxx' imports
+_api_path = os.path.join(_project_root, "api")
+if _api_path not in sys.path:
+    sys.path.insert(0, _api_path)
+
+# Also support running from inside the Docker container where code is at /app
 _container_app = "/app"
 if _container_app not in sys.path:
     sys.path.insert(0, _container_app)

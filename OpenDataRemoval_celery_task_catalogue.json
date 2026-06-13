@@ -1,0 +1,729 @@
+{
+  "document": "OpenDataRemoval Privacy Platform \u2014 Celery Task Catalogue",
+  "version": "1.0",
+  "date": "May 2026",
+  "framework": "Celery 5.x with Redis 7 broker",
+  "worker_config": {
+    "concurrency": 2,
+    "concurrency_env_var": "CELERY_WORKER_CONCURRENCY",
+    "loglevel": "info",
+    "module": "workers.celery_app",
+    "task_serializer": "json",
+    "result_serializer": "json",
+    "accept_content": [
+      "json"
+    ],
+    "timezone": "${TIMEZONE}",
+    "enable_utc": true,
+    "task_track_started": true,
+    "task_acks_late": true,
+    "worker_prefetch_multiplier": 1
+  },
+  "design_decisions": {
+    "failure_escalation": "Tasks retry up to max_retries then set request status to requires_manual and create dashboard notification",
+    "scan_dispatch": "Batched parallel \u2014 10 brokers per batch per profile via Celery chord. Profiles processed in parallel. Completion chord callback triggers post-scan analytics.",
+    "legal_letters": "CCPA/GDPR PDFs generated via WeasyPrint, stored on opendataremoval_screenshots volume, file path written to audit record, then emailed as attachment",
+    "post_scan_analytics": "Celery chord callback \u2014 fires score_computation and snapshot_generation tasks automatically when all scan tasks in the chord complete",
+    "idempotency": "All tasks keyed to prevent duplicate execution \u2014 same (profile_id, broker_id, date) never creates duplicate scan results or requests",
+    "audit_first": "All outbound actions write to audit.audit_log before executing \u2014 if audit write fails the action does not proceed"
+  },
+  "beat_schedule": {
+    "description": "Periodic tasks scheduled by Celery Beat running in the beat service container",
+    "tasks": [
+      {
+        "beat_name": "daily_full_scan",
+        "task": "workers.tasks.scanning.dispatch_daily_scan",
+        "schedule": "cron",
+        "cron": "${SCAN_SCHEDULE_CRON}",
+        "default_cron": "0 2 * * *",
+        "description": "Trigger full household scan at 02:00 daily",
+        "args": [],
+        "kwargs": {}
+      },
+      {
+        "beat_name": "nightly_screenshot_purge",
+        "task": "workers.tasks.maintenance.purge_expired_screenshots",
+        "schedule": "cron",
+        "cron": "0 3 * * *",
+        "description": "Delete screenshot files older than SCREENSHOT_RETENTION_DAYS",
+        "args": [],
+        "kwargs": {}
+      },
+      {
+        "beat_name": "weekly_broker_health_check",
+        "task": "workers.tasks.registry.check_broker_opt_out_urls",
+        "schedule": "cron",
+        "cron": "0 4 * * 0",
+        "description": "Verify all active broker opt-out URLs are reachable \u2014 flag unreachable ones",
+        "args": [],
+        "kwargs": {}
+      },
+      {
+        "beat_name": "hourly_followup_check",
+        "task": "workers.tasks.requests.process_due_followups",
+        "schedule": "cron",
+        "cron": "0 * * * *",
+        "description": "Find removal requests with next_action_at in the past and dispatch follow-up tasks",
+        "args": [],
+        "kwargs": {}
+      }
+    ]
+  },
+  "task_groups": {
+    "scanning": {
+      "description": "Tasks that execute broker scans and post-scan analytics",
+      "module": "workers.tasks.scanning",
+      "tasks": {
+        "dispatch_daily_scan": {
+          "task_name": "workers.tasks.scanning.dispatch_daily_scan",
+          "description": "Entry point for the daily full scan. Creates a scan_run record, then dispatches one dispatch_profile_scan task per active non-paused profile in parallel.",
+          "triggered_by": "Celery Beat (daily_full_scan schedule)",
+          "inputs": {},
+          "outputs": {
+            "scan_run_id": "UUID of the created scan_run record"
+          },
+          "celery_primitive": "group",
+          "implementation_notes": [
+            "Create scan_run row with run_type=daily_full, status=pending",
+            "Fetch all active non-paused profiles",
+            "Dispatch group([dispatch_profile_scan.s(profile_id, scan_run_id) for each profile])",
+            "Update scan_run status to running",
+            "Write audit_log: scan_started"
+          ],
+          "idempotency_key": "date + run_type=daily_full",
+          "retry_policy": {
+            "max_retries": 0,
+            "note": "Orchestrator only \u2014 individual scan tasks handle their own retries"
+          },
+          "on_failure": "Write audit_log scan_failed, create system_alert notification"
+        },
+        "dispatch_profile_scan": {
+          "task_name": "workers.tasks.scanning.dispatch_profile_scan",
+          "description": "Dispatches broker scan tasks for a single profile in batches of 10. Uses a Celery chord so post-scan analytics fire automatically when all batches complete.",
+          "triggered_by": "dispatch_daily_scan group, or POST /api/scans (manual)",
+          "inputs": {
+            "profile_id": "UUID",
+            "scan_run_id": "UUID"
+          },
+          "outputs": {
+            "batches_dispatched": "integer count"
+          },
+          "celery_primitive": "chord",
+          "batch_size": 10,
+          "implementation_notes": [
+            "Fetch all active brokers (is_active=True)",
+            "Split into batches of 10",
+            "chord(group([scan_broker.s(profile_id, broker_id, scan_run_id) for each broker in batch]) | compute_post_scan_analytics.s(profile_id, scan_run_id))",
+            "Update scan_run.total_brokers"
+          ],
+          "idempotency_key": "scan_run_id + profile_id",
+          "retry_policy": {
+            "max_retries": 0,
+            "note": "Orchestrator \u2014 child tasks retry independently"
+          }
+        },
+        "scan_broker": {
+          "task_name": "workers.tasks.scanning.scan_broker",
+          "description": "Executes a single broker scan for a single profile via the Playwright microservice. Creates or updates a scan_result row. If result_status=found, creates an exposure and dispatches execute_removal_request.",
+          "triggered_by": "dispatch_profile_scan chord",
+          "inputs": {
+            "profile_id": "UUID",
+            "broker_id": "UUID",
+            "scan_run_id": "UUID"
+          },
+          "outputs": {
+            "scan_result_id": "UUID",
+            "result_status": "found | not_found | inconclusive | captcha_blocked | rate_limited | error"
+          },
+          "celery_primitive": "task",
+          "implementation_notes": [
+            "Fetch active playbook for broker_id",
+            "Fetch decrypted profile fields for profile_id",
+            "POST to PLAYWRIGHT_SERVICE_URL/scan with playbook + field tokens",
+            "Create scan_result row with result",
+            "If result_status=found: create exposures row, dispatch execute_removal_request.delay(profile_id, broker_id, exposure_id)",
+            "If result_status=captcha_blocked: update broker.captcha_required=True, create action_required notification",
+            "Update scan_run.completed_brokers += 1",
+            "Publish SSE event to Redis pub/sub channel scan:{scan_run_id}"
+          ],
+          "idempotency_key": "scan_run_id + profile_id + broker_id",
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true,
+            "retry_backoff_max": 300,
+            "retry_jitter": true,
+            "retryable_exceptions": [
+              "PlaywrightTimeoutError",
+              "ConnectionError",
+              "HTTPError"
+            ],
+            "non_retryable": [
+              "captcha_blocked",
+              "rate_limited \u2014 set result and exit"
+            ]
+          },
+          "on_max_retries": "Set result_status=error, increment scan_run.failed_brokers, write audit_log"
+        },
+        "compute_post_scan_analytics": {
+          "task_name": "workers.tasks.scanning.compute_post_scan_analytics",
+          "description": "Chord callback \u2014 fires automatically when all broker scan tasks for a profile complete. Computes daily exposure score and writes broker snapshots to reporting schema.",
+          "triggered_by": "Chord callback from dispatch_profile_scan",
+          "inputs": {
+            "scan_results": "List of scan_result dicts (passed by chord)",
+            "profile_id": "UUID",
+            "scan_run_id": "UUID"
+          },
+          "outputs": {
+            "exposure_score_id": "UUID",
+            "score": "float 0.0-100.0"
+          },
+          "celery_primitive": "task (chord callback)",
+          "implementation_notes": [
+            "Count active exposures for profile_id",
+            "Compute score = ROUND(100 - (active / NULLIF(max_ever, 0)) * 100, 1)",
+            "Insert reporting.exposure_scores row",
+            "Insert reporting.daily_broker_snapshots rows for all brokers",
+            "Refresh reporting.field_exposure_summary for this profile",
+            "If scan_run all profiles complete: update scan_run.status=completed, write audit_log scan_completed",
+            "Create new_exposure notifications for any newly detected exposures"
+          ],
+          "idempotency_key": "profile_id + score_date (today)",
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          }
+        },
+        "dispatch_verification_scan": {
+          "task_name": "workers.tasks.scanning.dispatch_verification_scan",
+          "description": "Scheduled via Celery ETA. Runs a targeted single-broker scan to independently verify a broker has actually removed the profile after confirming removal.",
+          "triggered_by": "Celery ETA \u2014 scheduled when removal_request.status transitions to confirmed_removed (default 14 days after confirmation)",
+          "inputs": {
+            "profile_id": "UUID",
+            "broker_id": "UUID",
+            "request_id": "UUID",
+            "verification_scan_id": "UUID"
+          },
+          "outputs": {
+            "outcome": "verified_removed | still_listed | inconclusive"
+          },
+          "implementation_notes": [
+            "Create scan_run row with run_type=verification",
+            "Execute scan_broker for this profile/broker pair",
+            "If not_found: update verification_scan.outcome=verified_removed, update request.status=verified_removed, write audit_log",
+            "If found: update verification_scan.outcome=still_listed, create relisting_events row, dispatch execute_removal_request again, create relisting_detected notification",
+            "Update verification_scan.completed_at"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          }
+        }
+      }
+    },
+    "requests": {
+      "description": "Tasks that execute removal request workflows",
+      "module": "workers.tasks.requests",
+      "tasks": {
+        "execute_removal_request": {
+          "task_name": "workers.tasks.requests.execute_removal_request",
+          "description": "Orchestrates the full removal workflow for a single profile+broker exposure. Selects the correct removal method and dispatches the appropriate sub-task. Creates the removal_request row if it does not already exist.",
+          "triggered_by": "scan_broker (on found result), POST /api/requests/{id}/resubmit",
+          "inputs": {
+            "profile_id": "UUID",
+            "broker_id": "UUID",
+            "exposure_id": "UUID",
+            "parent_request_id": "UUID \u2014 optional, set for re-listing requests"
+          },
+          "outputs": {
+            "request_id": "UUID",
+            "method_dispatched": "web_form | email | ccpa_letter | gdpr_letter | manual"
+          },
+          "implementation_notes": [
+            "Fetch broker.removal_method",
+            "Create or fetch removal_request row (idempotent on exposure_id)",
+            "Write audit_log BEFORE dispatching \u2014 event_type=removal_initiated",
+            "Dispatch method task: web_form \u2192 submit_web_form_optout, email \u2192 send_removal_email, ccpa/gdpr \u2192 generate_and_send_legal_letter, manual \u2192 create_manual_action_item",
+            "Schedule follow-up ETA: followup_removal_request.apply_async(eta=now + broker.estimated_response_days * 86400)",
+            "Update request.next_action_at"
+          ],
+          "idempotency_key": "exposure_id \u2014 one active request per exposure",
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          },
+          "on_max_retries": "Set request.status=requires_manual, create action_required notification"
+        },
+        "submit_web_form_optout": {
+          "task_name": "workers.tasks.requests.submit_web_form_optout",
+          "description": "Uses the Playwright microservice to execute the broker's web form opt-out playbook. Captures confirmation screenshot.",
+          "triggered_by": "execute_removal_request",
+          "inputs": {
+            "request_id": "UUID",
+            "profile_id": "UUID",
+            "broker_id": "UUID"
+          },
+          "outputs": {
+            "submission_status": "confirmed | failed | captcha_blocked",
+            "screenshot_path": "string"
+          },
+          "implementation_notes": [
+            "Fetch active playbook for broker",
+            "Fetch decrypted profile fields",
+            "POST to PLAYWRIGHT_SERVICE_URL/optout with playbook + fields",
+            "On confirmation detected: update request.status=pending_confirmation, write audit_log removal_submitted",
+            "On captcha_blocked: update request.status=requires_manual, update broker.captcha_required=True, create action_required notification",
+            "Store screenshot in scanning.screenshots linked to request audit record"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true,
+            "retry_backoff_max": 600,
+            "non_retryable": [
+              "captcha_blocked"
+            ]
+          },
+          "on_max_retries": "Set request.status=requires_manual, create notification"
+        },
+        "send_removal_email": {
+          "task_name": "workers.tasks.requests.send_removal_email",
+          "description": "Composes and sends a removal request email from the dedicated removal mailbox. Renders Jinja2 template (broker-specific or generic fallback). Logs sent email to audit record.",
+          "triggered_by": "execute_removal_request",
+          "inputs": {
+            "request_id": "UUID",
+            "profile_id": "UUID",
+            "broker_id": "UUID"
+          },
+          "outputs": {
+            "email_sent": "boolean",
+            "message_id": "string \u2014 SMTP Message-ID header"
+          },
+          "implementation_notes": [
+            "Fetch broker email_template (broker-specific first, generic fallback)",
+            "Render Jinja2 template with decrypted profile tokens",
+            "Send via SMTP with profile data as subject context",
+            "Store SMTP Message-ID for Mailwatcher correlation",
+            "Write audit_log: removal_email_sent BEFORE smtp.sendmail()",
+            "Update request.status=pending_confirmation, request.submitted_at=now()"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true,
+            "retryable_exceptions": [
+              "SMTPException",
+              "ConnectionRefusedError"
+            ]
+          },
+          "on_max_retries": "Set request.status=requires_manual"
+        },
+        "generate_and_send_legal_letter": {
+          "task_name": "workers.tasks.requests.generate_and_send_legal_letter",
+          "description": "Generates a CCPA or GDPR legal deletion request letter as a PDF using WeasyPrint, stores the file, attaches it to an outbound email, and sends it. File path written to audit record.",
+          "triggered_by": "execute_removal_request (when broker.ccpa_applicable=True or broker.gdpr_applicable=True)",
+          "inputs": {
+            "request_id": "UUID",
+            "profile_id": "UUID",
+            "broker_id": "UUID",
+            "letter_type": "ccpa_letter | gdpr_letter"
+          },
+          "outputs": {
+            "pdf_path": "string \u2014 path on opendataremoval_screenshots volume",
+            "email_sent": "boolean"
+          },
+          "implementation_notes": [
+            "Render Jinja2 legal template with decrypted profile fields",
+            "Generate PDF via WeasyPrint \u2014 save to opendataremoval_screenshots volume",
+            "Record pdf_path in audit_log detail JSON",
+            "Write audit_log: legal_letter_generated BEFORE sending",
+            "Send email with PDF as attachment via SMTP",
+            "Update request.status=pending_confirmation, request.submitted_at=now()"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          },
+          "on_max_retries": "Set request.status=requires_manual, retain generated PDF"
+        },
+        "followup_removal_request": {
+          "task_name": "workers.tasks.requests.followup_removal_request",
+          "description": "Scheduled via Celery ETA. Fires when broker has not responded within their stated response window. Sends a follow-up using the same method as the original. Maximum 3 follow-ups before escalating to requires_manual.",
+          "triggered_by": "Celery ETA \u2014 set at request creation time (broker.estimated_response_days, default 30 days)",
+          "inputs": {
+            "request_id": "UUID",
+            "followup_number": "integer 1|2|3"
+          },
+          "outputs": {
+            "action_taken": "followup_sent | escalated_to_manual | skipped_already_resolved"
+          },
+          "implementation_notes": [
+            "Fetch request \u2014 if status is confirmed_removed, verified_removed, or requires_manual: skip (already resolved)",
+            "If followup_number <= 3: create followups row, re-dispatch appropriate method task (send_removal_email or submit_web_form_optout)",
+            "Update request.followup_count += 1",
+            "Schedule next follow-up ETA if followup_number < 3",
+            "If followup_number == 3: after dispatch set next check to 30 days, if still unresolved \u2192 set status=requires_manual, create action_required notification"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          },
+          "escalation": "After 3 follow-ups with no response: status=requires_manual, create action_required notification with full request context"
+        },
+        "process_due_followups": {
+          "task_name": "workers.tasks.requests.process_due_followups",
+          "description": "Hourly sweep that finds any removal_requests with next_action_at in the past that were not triggered by their ETA task (e.g. worker was down). Safety net for missed ETA dispatches.",
+          "triggered_by": "Celery Beat \u2014 hourly",
+          "inputs": {},
+          "outputs": {
+            "dispatched_count": "integer"
+          },
+          "implementation_notes": [
+            "SELECT id, followup_count FROM requests.removal_requests WHERE next_action_at <= now() AND status IN (pending_confirmation, submitted) AND followup_count < 3",
+            "For each: dispatch followup_removal_request.delay(request_id, followup_count + 1)",
+            "Log count to system_events"
+          ],
+          "retry_policy": {
+            "max_retries": 1
+          }
+        },
+        "process_email_classification": {
+          "task_name": "workers.tasks.requests.process_email_classification",
+          "description": "Triggered by Mailwatcher after classifying an inbound email. Updates the corresponding removal_request status based on classification result.",
+          "triggered_by": "Mailwatcher service via direct API call to POST /api/webhooks/mail-classification (internal only)",
+          "inputs": {
+            "message_classification_id": "UUID",
+            "request_id": "UUID \u2014 may be None if unmatched",
+            "classification": "confirmed_removal | rejection | info_requested | unclassified"
+          },
+          "outputs": {
+            "action_taken": "status_updated | notification_created | ignored"
+          },
+          "implementation_notes": [
+            "confirmed_removal: update request.status=confirmed_removed, request.confirmed_at=now(), schedule dispatch_verification_scan ETA (14 days), create removal_confirmed notification",
+            "rejection: update request.status=failed, create action_required notification with raw email body",
+            "info_requested: update request.status=requires_manual, create action_required notification with raw email body attached",
+            "unclassified: create action_required notification with raw email body for human review",
+            "Write audit_log: email_response_processed for all classifications"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          }
+        }
+      }
+    },
+    "maintenance": {
+      "description": "Housekeeping and storage management tasks",
+      "module": "workers.tasks.maintenance",
+      "tasks": {
+        "purge_expired_screenshots": {
+          "task_name": "workers.tasks.maintenance.purge_expired_screenshots",
+          "description": "Nightly task. Finds screenshot files past their purge_at date, deletes the files from the opendataremoval_screenshots volume, and stamps purged_at on the row. The database row is retained for audit trail.",
+          "triggered_by": "Celery Beat \u2014 nightly at 03:00",
+          "inputs": {},
+          "outputs": {
+            "files_purged": "integer",
+            "bytes_freed": "integer"
+          },
+          "implementation_notes": [
+            "SELECT id, file_path FROM scanning.screenshots WHERE purge_at <= now() AND purged_at IS NULL",
+            "For each: os.remove(file_path) \u2014 skip with warning if file not found",
+            "UPDATE scanning.screenshots SET purged_at=now() WHERE id=...",
+            "Write system_events row with bytes_freed total"
+          ],
+          "retry_policy": {
+            "max_retries": 2
+          }
+        },
+        "compute_disk_usage": {
+          "task_name": "workers.tasks.maintenance.compute_disk_usage",
+          "description": "Hourly task that measures disk usage of all opendataremoval volumes and caches the result in Redis for the /api/system/health endpoint.",
+          "triggered_by": "Celery Beat \u2014 hourly",
+          "inputs": {},
+          "outputs": {
+            "volumes": {
+              "db_data_bytes": "integer",
+              "screenshots_bytes": "integer",
+              "logs_bytes": "integer",
+              "n8n_bytes": "integer"
+            }
+          },
+          "implementation_notes": [
+            "Use shutil.disk_usage() per volume mount point",
+            "Cache result in Redis key opendataremoval:disk_usage with 70-minute TTL",
+            "/api/system/health reads from this Redis key"
+          ],
+          "retry_policy": {
+            "max_retries": 1
+          }
+        }
+      }
+    },
+    "registry": {
+      "description": "Broker registry maintenance tasks",
+      "module": "workers.tasks.registry",
+      "tasks": {
+        "check_broker_opt_out_urls": {
+          "task_name": "workers.tasks.registry.check_broker_opt_out_urls",
+          "description": "Weekly task. For each active broker with a web form removal method, performs a lightweight HTTP HEAD request to the opt_out_url to verify it is reachable. Flags unreachable brokers.",
+          "triggered_by": "Celery Beat \u2014 weekly Sunday 04:00",
+          "inputs": {},
+          "outputs": {
+            "checked": "integer",
+            "unreachable": "integer",
+            "flagged": "list of broker_ids"
+          },
+          "implementation_notes": [
+            "Fetch all active brokers WHERE removal_method=web_form AND opt_out_url IS NOT NULL",
+            "For each: HTTP HEAD to opt_out_url with 10s timeout",
+            "If 4xx/5xx or timeout: update broker.last_verified_at, add note to broker.notes, create system_alert notification",
+            "If 2xx/3xx: update broker.last_verified_at",
+            "Write system_events row with summary"
+          ],
+          "retry_policy": {
+            "max_retries": 1
+          }
+        },
+        "upsert_broker_from_discovery": {
+          "task_name": "workers.tasks.registry.upsert_broker_from_discovery",
+          "description": "Called by the /api/webhooks/n8n handler for each broker in an n8n discovery payload. Upserts by canonical_domain. Validates playbook_json against JSON Schema before inserting.",
+          "triggered_by": "POST /api/webhooks/n8n (per broker in batch)",
+          "inputs": {
+            "broker_data": "dict \u2014 full broker payload from n8n",
+            "source": "string \u2014 discovery feed name"
+          },
+          "outputs": {
+            "action": "inserted | updated | skipped_no_change",
+            "broker_id": "UUID"
+          },
+          "implementation_notes": [
+            "Upsert registry.brokers ON CONFLICT (canonical_domain) DO UPDATE only changed fields",
+            "If playbook_json present: validate against JSON Schema, if valid insert new broker_playbooks version with is_active=True",
+            "Write audit_log: broker_registry_upsert with source field",
+            "Return action taken for webhook response aggregation"
+          ],
+          "retry_policy": {
+            "max_retries": 3
+          }
+        }
+      }
+    },
+    "notifications": {
+      "description": "Notification creation and delivery tasks",
+      "module": "workers.tasks.notifications",
+      "tasks": {
+        "create_notification": {
+          "task_name": "workers.tasks.notifications.create_notification",
+          "description": "Creates a notification row in auth.notifications and publishes the event to the Redis pub/sub channel for WebSocket fanout to connected dashboard clients.",
+          "triggered_by": "Any task that needs to surface information to the dashboard",
+          "inputs": {
+            "notification_type": "string \u2014 enum value",
+            "title": "string",
+            "body": "string \u2014 optional",
+            "entity_type": "string \u2014 optional",
+            "entity_id": "UUID \u2014 optional",
+            "profile_id": "UUID \u2014 optional",
+            "user_id": "UUID \u2014 optional, null=all admins"
+          },
+          "outputs": {
+            "notification_id": "UUID"
+          },
+          "implementation_notes": [
+            "INSERT auth.notifications row",
+            "Publish to Redis channel opendataremoval:notifications:{household_id} via redis.publish()",
+            "WebSocket handler fans out to all connected clients for this household"
+          ],
+          "retry_policy": {
+            "max_retries": 3,
+            "retry_backoff": true
+          }
+        }
+      }
+    },
+    "reports": {
+      "description": "Report generation tasks",
+      "module": "workers.tasks.reports",
+      "tasks": {
+        "generate_export_report": {
+          "task_name": "workers.tasks.reports.generate_export_report",
+          "description": "Triggered for large report exports (>10k rows). Generates the file in the background and creates a notification with a download link when complete.",
+          "triggered_by": "GET /api/reports/export when row count exceeds threshold",
+          "inputs": {
+            "report_type": "string \u2014 exposure_score|field_exposure|relistings|audit_log|removal_requests",
+            "format": "pdf | csv",
+            "profile_id": "UUID \u2014 optional",
+            "from_date": "ISO date \u2014 optional",
+            "to_date": "ISO date \u2014 optional",
+            "requested_by_user_id": "UUID"
+          },
+          "outputs": {
+            "file_path": "string \u2014 path to generated file",
+            "download_url": "string \u2014 /api/reports/download/{token}"
+          },
+          "implementation_notes": [
+            "Query reporting schema with filters",
+            "For PDF: render via WeasyPrint to opendataremoval_screenshots volume",
+            "For CSV: write to temp file on opendataremoval_logs volume",
+            "Generate signed time-limited download token (JWT with file_path claim, 1h TTL)",
+            "Dispatch create_notification with download_url"
+          ],
+          "retry_policy": {
+            "max_retries": 2
+          }
+        }
+      }
+    }
+  },
+  "task_dependency_map": {
+    "description": "Shows how tasks chain and trigger each other",
+    "flows": [
+      {
+        "flow": "Daily Scan",
+        "sequence": [
+          "Celery Beat \u2192 dispatch_daily_scan",
+          "dispatch_daily_scan \u2192 group([dispatch_profile_scan per profile])",
+          "dispatch_profile_scan \u2192 chord(group([scan_broker x 10 per batch]) | compute_post_scan_analytics)",
+          "scan_broker (if found) \u2192 execute_removal_request",
+          "execute_removal_request \u2192 submit_web_form_optout OR send_removal_email OR generate_and_send_legal_letter",
+          "execute_removal_request \u2192 schedule followup_removal_request ETA",
+          "compute_post_scan_analytics \u2192 create_notification (per new exposure)"
+        ]
+      },
+      {
+        "flow": "Email Response Processing",
+        "sequence": [
+          "Mailwatcher polls IMAP every 15 min",
+          "Mailwatcher classifies \u2192 calls process_email_classification",
+          "process_email_classification (confirmed_removal) \u2192 schedule dispatch_verification_scan ETA (14 days)",
+          "process_email_classification \u2192 create_notification"
+        ]
+      },
+      {
+        "flow": "Verification Re-scan",
+        "sequence": [
+          "Celery ETA fires dispatch_verification_scan",
+          "dispatch_verification_scan \u2192 scan_broker (targeted)",
+          "If still_listed \u2192 create relisting_events row",
+          "If still_listed \u2192 execute_removal_request (new request with parent_request_id set)",
+          "If still_listed \u2192 create_notification (relisting_detected)"
+        ]
+      },
+      {
+        "flow": "Follow-up Cycle",
+        "sequence": [
+          "Celery ETA fires followup_removal_request",
+          "followup_removal_request (count < 3) \u2192 re-dispatch original method task",
+          "followup_removal_request (count == 3, no response) \u2192 set requires_manual",
+          "followup_removal_request \u2192 create_notification (action_required)",
+          "Hourly process_due_followups acts as safety net for missed ETAs"
+        ]
+      }
+    ]
+  },
+  "retry_policy_defaults": {
+    "standard": {
+      "max_retries": 3,
+      "retry_backoff": true,
+      "retry_backoff_max": 600,
+      "retry_jitter": true
+    },
+    "orchestrators": {
+      "max_retries": 0,
+      "note": "Dispatch/orchestrator tasks do not retry \u2014 child tasks handle their own retries"
+    },
+    "maintenance": {
+      "max_retries": 1,
+      "retry_backoff": false
+    },
+    "final_escalation": "All tasks that reach max_retries set request.status=requires_manual and dispatch create_notification with notification_type=action_required"
+  },
+  "audit_log_events": {
+    "description": "event_type values written to audit.audit_log by Celery tasks",
+    "events": [
+      {
+        "event_type": "scan_started",
+        "written_by": "dispatch_daily_scan"
+      },
+      {
+        "event_type": "scan_completed",
+        "written_by": "compute_post_scan_analytics"
+      },
+      {
+        "event_type": "scan_failed",
+        "written_by": "dispatch_daily_scan on failure"
+      },
+      {
+        "event_type": "removal_initiated",
+        "written_by": "execute_removal_request"
+      },
+      {
+        "event_type": "removal_submitted",
+        "written_by": "submit_web_form_optout, send_removal_email"
+      },
+      {
+        "event_type": "legal_letter_generated",
+        "written_by": "generate_and_send_legal_letter"
+      },
+      {
+        "event_type": "removal_email_sent",
+        "written_by": "send_removal_email"
+      },
+      {
+        "event_type": "followup_sent",
+        "written_by": "followup_removal_request"
+      },
+      {
+        "event_type": "email_response_processed",
+        "written_by": "process_email_classification"
+      },
+      {
+        "event_type": "verification_scan_complete",
+        "written_by": "dispatch_verification_scan"
+      },
+      {
+        "event_type": "relisting_detected",
+        "written_by": "dispatch_verification_scan"
+      },
+      {
+        "event_type": "broker_registry_upsert",
+        "written_by": "upsert_broker_from_discovery"
+      },
+      {
+        "event_type": "playbook_imported",
+        "written_by": "upsert_broker_from_discovery"
+      },
+      {
+        "event_type": "playbook_updated",
+        "written_by": "upsert_broker_from_discovery"
+      },
+      {
+        "event_type": "screenshot_purged",
+        "written_by": "purge_expired_screenshots"
+      }
+    ]
+  },
+  "redis_channels": {
+    "description": "Redis pub/sub channels used for real-time communication",
+    "channels": [
+      {
+        "channel": "opendataremoval:notifications:{household_id}",
+        "publisher": "create_notification task",
+        "subscriber": "WebSocket handler in API service"
+      },
+      {
+        "channel": "opendataremoval:scan:{scan_run_id}",
+        "publisher": "scan_broker task",
+        "subscriber": "SSE handler for /api/scans/{id}/progress"
+      },
+      {
+        "channel": "opendataremoval:disk_usage",
+        "publisher": "compute_disk_usage task",
+        "subscriber": "/api/system/health endpoint (reads from Redis key not channel)"
+      }
+    ]
+  },
+  "celery_canvas_patterns": {
+    "daily_scan_chord": "chord(group([scan_broker.s(p_id, b_id, run_id) for b_id in batch]) | compute_post_scan_analytics.s(profile_id, run_id))",
+    "profile_group": "group([dispatch_profile_scan.s(p_id, run_id) for p_id in active_profiles])",
+    "eta_followup": "followup_removal_request.apply_async(args=[request_id, 1], eta=datetime.now() + timedelta(days=broker.estimated_response_days or 30))",
+    "eta_verification": "dispatch_verification_scan.apply_async(args=[profile_id, broker_id, request_id, vscan_id], eta=datetime.now() + timedelta(days=14))"
+  }
+}
