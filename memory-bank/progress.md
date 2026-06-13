@@ -222,8 +222,8 @@ All Sprint 4 deliverables implemented and verified.
 - Tests: 30+ files (unit + integration + e2e)
 - Configuration: Docker, migrations, playbooks, workflows
 
-## Sprint 5 (IN PROGRESS) - Removal Request Tracking, PDF Generation, WebSocket Progress
-Sprint 5 implements the removal request lifecycle tracking and real-time scan progress.
+## Sprint 5 (COMPLETED ✅) - Removal Request Tracking, PDF Generation, WebSocket Progress
+Sprint 5 implements the removal request lifecycle tracking and real-time scan progress. All deliverables completed, version bumped to 1.02.
 
 ### S5-T1: Removal Request CRUD API (COMPLETE ✅)
 - [x] `api/schemas/request.py` - Pydantic schemas (RemovalRequest, RequestStatusLog, Followup, VerificationScan)
@@ -269,7 +269,7 @@ Sprint 5 implements the removal request lifecycle tracking and real-time scan pr
 - `frontend/src/App.jsx` - Added /requests route
 - `frontend/src/components/DashboardLayout.jsx` - Added Requests nav link, fixed paths
 - `frontend/src/lib/api.js` - Added requestsApi, connectScanProgress
-- `frontend/package.json` - Version bump 1.01
+- `frontend/package.json` - Version bump 1.01 → 1.02
 
 ### Known Issues / Future Work
 - [ ] Password reset flow with email verification
