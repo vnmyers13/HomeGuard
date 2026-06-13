@@ -158,6 +158,38 @@ export const systemApi = {
   health: () => api.get('/system/health'),
 };
 
+// --- Alert endpoints ---
+
+export const alertsApi = {
+  list: (params) => api.get('/alerts', { params }),
+  get: (id) => api.get(`/alerts/${id}`),
+  acknowledge: (id) => api.post(`/alerts/${id}/acknowledge`),
+};
+
+// --- Notification preferences (client-side only, no backend endpoint yet) ---
+
+const PREFS_KEY = 'homeguard_prefs';
+
+export const getPreferences = () => {
+  const stored = localStorage.getItem(PREFS_KEY);
+  if (stored) return Promise.resolve({ data: JSON.parse(stored) });
+  return Promise.resolve({
+    data: {
+      email_enabled: true,
+      in_app_enabled: true,
+      digest_frequency: 'realtime',
+      alert_types: { new_listing: true, removal: true, scan_complete: true, opt_out: true },
+    },
+  });
+};
+
+export const updatePreferences = (prefs) => {
+  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  return Promise.resolve({ data: prefs });
+};
+
+export const getAlerts = (params) => alertsApi.list(params);
+
 // --- Convenience exports (shorthand) ---
 
 export const getProfiles = profilesApi.list;
