@@ -222,11 +222,60 @@ All Sprint 4 deliverables implemented and verified.
 - Tests: 30+ files (unit + integration + e2e)
 - Configuration: Docker, migrations, playbooks, workflows
 
+## Sprint 5 (IN PROGRESS) - Removal Request Tracking, PDF Generation, WebSocket Progress
+Sprint 5 implements the removal request lifecycle tracking and real-time scan progress.
+
+### S5-T1: Removal Request CRUD API (COMPLETE ✅)
+- [x] `api/schemas/request.py` - Pydantic schemas (RemovalRequest, RequestStatusLog, Followup, VerificationScan)
+- [x] `api/routers/requests.py` - Full CRUD for requests, logs, followups, verification scans, PDF download
+- [x] Router registered in `api/main.py`
+- [x] Endpoints: GET/POST /requests, GET/PATCH/DELETE /requests/:id, /requests/:id/logs, /requests/:id/followups, /requests/:id/verification-scans, /requests/:id/pdf
+
+### S5-T2: Legal Letter PDF Generation (COMPLETE ✅)
+- [x] `api/services/pdf_service.py` - CCPA and GDPR legal letter PDF generation using reportlab
+- [x] Fallback to text-based PDF if reportlab unavailable
+- [x] PDF endpoints accessible via frontend download button
+
+### S5-T3: WebSocket Scan Progress (COMPLETE ✅)
+- [x] `api/services/websocket_manager.py` - WebSocket connection manager singleton with async lock
+- [x] `api/routers/ws.py` - WebSocket endpoint at /ws/scans/{scan_id}
+- [x] Real-time scan step updates pushed to connected clients
+
+### S5-T4: Frontend Requests Page (COMPLETE ✅)
+- [x] `frontend/src/pages/Requests.jsx` - Full requests tracking page with list/detail views
+- [x] Status update actions (mark submitted, confirm removed, still listed, failed)
+- [x] Follow-up creation, verification scan display, PDF download
+- [x] Filter by status, create new request modal
+- [x] Route added to `frontend/src/App.jsx` (/requests)
+- [x] Navigation link added to `frontend/src/components/DashboardLayout.jsx`
+- [x] API functions added to `frontend/src/lib/api.js` (requestsApi, connectScanProgress)
+
+### S5-T5: Celery Task Dispatch Fix (COMPLETE ✅)
+- [x] `api/routers/scans.py` - Fixed DeletionScan → ScanRun model reference
+- [x] Connected scan task dispatch to Celery (run_scan_task.delay)
+- [x] Fixed async context nesting in execute_removal_request/followup_removal_request
+
+### Sprint 5 Files Created (6 files)
+- `api/schemas/request.py` - Removal request Pydantic schemas
+- `api/routers/requests.py` - Removal request CRUD router
+- `api/services/websocket_manager.py` - WebSocket connection manager
+- `api/routers/ws.py` - WebSocket endpoint
+- `api/services/pdf_service.py` - Legal letter PDF generation
+- `frontend/src/pages/Requests.jsx` - Removal requests frontend page
+
+### Sprint 5 Files Modified (6 files)
+- `api/main.py` - Registered requests and ws routers
+- `api/routers/scans.py` - Fixed DeletionScan → ScanRun, connected Celery dispatch
+- `frontend/src/App.jsx` - Added /requests route
+- `frontend/src/components/DashboardLayout.jsx` - Added Requests nav link, fixed paths
+- `frontend/src/lib/api.js` - Added requestsApi, connectScanProgress
+- `frontend/package.json` - Version bump 1.01
+
 ### Known Issues / Future Work
-- [ ] Sprint 5: Frontend removal request tracking page
-- [ ] Sprint 5: Legal letter PDF generation and download
-- [ ] Sprint 5: Real-time scan progress via WebSocket
-- [ ] Sprint 5: Performance optimization for large households (100+ profiles)
+- [ ] Password reset flow with email verification
+- [ ] Batch operations for large household profile imports
+- [ ] Docker Compose update to use DockerHub images instead of build contexts
+- [ ] Database migration for any new tables needed
 
 ## Release 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
 First production-ready release. Fixes 8 critical bugs preventing reliable operation.

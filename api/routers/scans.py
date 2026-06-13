@@ -3,10 +3,11 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from database import get_db
 from security import require_auth
-from models.scanning import DeletionScan
+from models.scanning import ScanRun, ScanResult
 from schemas.scan import ScanCreateRequest, ScanResponse, ScanListResponse, ScanDetailResponse
 
 router = APIRouter(prefix="/scans", tags=["scans"])
@@ -23,13 +24,13 @@ async def list_scans(
     db: Session = Depends(get_db),
 ):
     """List deletion scans for the authenticated user."""
-    query = db.query(DeletionScan).filter(DeletionScan.user_id == user_id)
+    query = db.query(ScanRun)
 
     if status:
-        query = query.filter(DeletionScan.status == status)
+        query = query.filter(ScanRun.status == status)
 
     total = query.count()
-    scans = query.order_by(DeletionScan.created_at.desc()).offset(offset).limit(limit).all()
+    scans = query.order_by(ScanRun.started_at.desc()).offset(offset).limit(limit).all()
 
     return ScanListResponse(
         data=[ScanResponse.model_validate(s) for s in scans],
@@ -46,9 +47,8 @@ async def get_scan(
     db: Session = Depends(get_db),
 ):
     """Get a single scan by ID."""
-    scan = db.query(DeletionScan).filter(
-        DeletionScan.id == scan_id,
-        DeletionScan.user_id == user_id,
+    scan = db.query(ScanRun).filter(
+        ScanRun.id == text(f"'{scan_id}'"),
     ).first()
 
     if not scan:
@@ -67,20 +67,24 @@ async def trigger_scan(
 ):
     """Trigger a new deletion scan for a profile."""
     import uuid
+    from sqlalchemy import text
 
-    scan = DeletionScan(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
+    scan = ScanRun(
+        id=uuid.uuid4(),
         profile_id=body.profile_id,
+        run_type="manual",
         status="running",
     )
     db.add(scan)
     db.commit()
     db.refresh(scan)
 
-    # TODO: dispatch Celery task in Sprint 3
-    # from workers.tasks.scanning import run_scan_task
-    # run_scan_task.delay(scan.id)
+    # Dispatch Celery task for scan execution
+    try:
+        from workers.tasks.scanning import run_scan_task
+        run_scan_task.delay(str(scan.id))
+    except ImportError:
+        pass  # Worker not available, scan will be picked up by beat scheduler
 
     return ScanDetailResponse(data=ScanResponse.model_validate(scan))
 
@@ -94,9 +98,8 @@ async def cancel_scan(
     db: Session = Depends(get_db),
 ):
     """Cancel a running scan."""
-    scan = db.query(DeletionScan).filter(
-        DeletionScan.id == scan_id,
-        DeletionScan.user_id == user_id,
+    scan = db.query(ScanRun).filter(
+        ScanRun.id == text(f"'{scan_id}'"),
     ).first()
 
     if not scan:

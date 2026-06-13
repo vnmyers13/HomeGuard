@@ -17,6 +17,7 @@ import Household from './pages/Household';
 import Brokers from './pages/Brokers';
 import Scans from './pages/Scans';
 import Notifications from './pages/Notifications';
+import Requests from './pages/Requests';
 import { useAuthStore } from './stores/authStore';
 
 // ----------------------
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="brokers" element={<Brokers />} />
           <Route path="scans" element={<Scans />} />
           <Route path="notifications" element={<Notifications />} />
+          <Route path="requests" element={<Requests />} />
         </Route>
 
         {/* Fallback: redirect to dashboard */}

@@ -190,6 +190,60 @@ export const updatePreferences = (prefs) => {
 
 export const getAlerts = (params) => alertsApi.list(params);
 
+// --- Removal request endpoints ---
+
+export const requestsApi = {
+  list: (params) => api.get('/requests', { params }),
+  get: (id) => api.get(`/requests/${id}`),
+  create: (data) => api.post('/requests', data),
+  update: (id, data) => api.patch(`/requests/${id}`, data),
+  delete: (id) => api.delete(`/requests/${id}`),
+  getLogs: (id) => api.get(`/requests/${id}/logs`),
+  getFollowups: (id) => api.get(`/requests/${id}/followups`),
+  createFollowup: (id, data) => api.post(`/requests/${id}/followups`, data),
+  getVerificationScans: (id) => api.get(`/requests/${id}/verification-scans`),
+  createVerificationScan: (id, data) => api.post(`/requests/${id}/verification-scans`, data),
+  downloadPdf: (id, type = 'ccpa') => api.get(`/requests/${id}/pdf`, { params: { letter_type: type }, responseType: 'blob' }),
+};
+
+export const getRequests = requestsApi.list;
+export const createRequest = requestsApi.create;
+export const updateRequest = requestsApi.update;
+export const deleteRequest = requestsApi.delete;
+export const getRequest = requestsApi.get;
+export const downloadLegalLetter = requestsApi.downloadPdf;
+export const getFollowups = requestsApi.getFollowups;
+export const createFollowup = requestsApi.createFollowup;
+export const getVerificationScans = requestsApi.getVerificationScans;
+export const createVerificationScan = requestsApi.createVerificationScan;
+
+// --- WebSocket scan progress ---
+
+export function connectScanProgress(scanId, onMessage) {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}/api/ws/scans/${scanId}`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+    } catch (e) {
+      console.error('WebSocket message parse error:', e);
+    }
+  };
+
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+
+  ws.onclose = () => {
+    console.log('WebSocket closed');
+  };
+
+  return ws;
+}
+
 // --- Convenience exports (shorthand) ---
 
 export const getProfiles = profilesApi.list;
