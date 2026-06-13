@@ -1,5 +1,87 @@
 # HomeGuard Release Notes
 
+## Version 1.02 - Removal Request Tracking & Real-Time Progress (2026-06-13)
+
+### Overview
+Sprint 5 delivers the removal request lifecycle tracking system, legal letter PDF generation, and real-time scan progress via WebSockets. Users can now create removal requests, track their status through the confirmation pipeline, generate CCPA/GDPR legal letters, and monitor scan progress in real-time.
+
+---
+
+### New Features
+
+#### Removal Request CRUD API
+- **Request schemas** - Pydantic models for RemovalRequest, RequestStatusLog, Followup, VerificationScan
+- **Full CRUD endpoints** - GET/POST /api/requests, GET/PATCH/DELETE /api/requests/:id
+- **Status logs** - Track status changes with /api/requests/:id/logs
+- **Follow-up management** - Create and track follow-up attempts with /api/requests/:id/followups
+- **Verification scans** - Schedule and track verification scans with /api/requests/:id/verification-scans
+- **Pagination** - All list endpoints support limit/offset pagination (default 50, max 200)
+
+#### Legal Letter PDF Generation
+- **CCPA letters** - California Consumer Privacy Act deletion demand letters
+- **GDPR letters** - General Data Protection Regulation erasure requests
+- **reportlab rendering** - Professional PDF output with formatted headers, body text, and signatures
+- **Fallback rendering** - Graceful text-based PDF if reportlab unavailable
+- **Download endpoint** - GET /api/requests/:id/pdf?letter_type=ccpa|gdpr
+
+#### WebSocket Scan Progress
+- **Real-time updates** - WebSocket endpoint at ws://host/ws/scans/{scan_id}
+- **Connection manager** - Singleton WebSocketManager with async lock for thread safety
+- **Step-by-step progress** - Each scan step pushes updates to connected clients
+- **Automatic cleanup** - Connections cleaned up on scan completion or client disconnect
+
+#### Frontend Requests Page
+- **List view** - Filterable table with status badges, method icons, pagination
+- **Detail view** - Request status, follow-up timeline, verification scan history
+- **Status actions** - One-click status updates (submitted, confirmed_removed, still_listed, failed)
+- **Follow-up creation** - Add email or legal follow-ups from detail view
+- **PDF download** - Download legal letters directly from the UI
+- **Create modal** - New request form with profile/broker/method selection
+- **Navigation** - Added to sidebar with document icon
+
+#### Celery Task Dispatch Fix
+- **ScanRun model reference** - Fixed DeletionScan → ScanRun in scans.py
+- **Celery integration** - Connected scan triggering to run_scan_task.delay()
+- **Async context fix** - Proper single-async-context for execute_removal_request/followup_removal_request
+
+---
+
+### API Endpoints Added
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | /api/requests | Yes | List removal requests (paginated) |
+| POST | /api/requests | Yes | Create new removal request |
+| GET | /api/requests/:id | Yes | Get request detail |
+| PATCH | /api/requests/:id | Yes | Update request (status, confirmation) |
+| DELETE | /api/requests/:id | Yes | Delete removal request |
+| GET | /api/requests/:id/logs | Yes | Get request status logs |
+| GET | /api/requests/:id/followups | Yes | Get follow-up attempts |
+| POST | /api/requests/:id/followups | Yes | Create follow-up |
+| GET | /api/requests/:id/verification-scans | Yes | Get verification scans |
+| POST | /api/requests/:id/verification-scans | Yes | Schedule verification scan |
+| GET | /api/requests/:id/pdf | Yes | Download legal letter PDF |
+| WS | /api/ws/scans/{scan_id} | Yes | Real-time scan progress |
+
+---
+
+### Files Added (6)
+- `api/schemas/request.py` - Removal request Pydantic schemas
+- `api/routers/requests.py` - Full CRUD router for removal requests
+- `api/services/websocket_manager.py` - WebSocket connection manager
+- `api/routers/ws.py` - WebSocket endpoint
+- `api/services/pdf_service.py` - Legal letter PDF generation
+- `frontend/src/pages/Requests.jsx` - Removal requests frontend page
+
+### Files Modified (6)
+- `api/main.py` - Registered requests and ws routers
+- `api/routers/scans.py` - Fixed DeletionScan→ScanRun, connected Celery dispatch
+- `frontend/src/App.jsx` - Added /requests route
+- `frontend/src/components/DashboardLayout.jsx` - Added Requests nav, fixed paths
+- `frontend/src/lib/api.js` - Added requestsApi, connectScanProgress
+- `frontend/package.json` - Version 1.01 → 1.02
+
+---
+
 ## Version 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
 
 ### Overview
