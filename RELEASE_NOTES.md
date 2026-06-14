@@ -1,5 +1,62 @@
 # HomeGuard Release Notes
 
+## Version 1.04 - Password Reset, Batch Operations & Test Suite Fixes (2026-06-13)
+
+### Overview
+Sprint 5.6 completes the password reset flow, batch profile operations, and fixes the test suite. DockerHub images are now available for all services.
+
+---
+
+### New Features
+
+#### Password Reset Flow
+- **Forgot password** - POST /auth/forgot-password generates 6-digit reset code
+- **Magic link generation** - Creates time-limited reset links with email delivery
+- **Code verification** - POST /auth/verify-code validates reset code
+- **Password reset** - POST /auth/reset-password sets new password
+- **Token model** - PasswordResetToken stored in DB with expiry and usage tracking
+- **Session revocation** - All active sessions invalidated on password reset
+
+#### Batch Profile Operations
+- **Batch create** - POST /profiles/batch creates up to 100 profiles per request
+- **Per-profile tracking** - Success/failure tracking in batch responses
+- **Validation** - Full profile validation applied to each profile in batch
+
+#### Test Suite Fixes
+- **Import fixes** - pytest.importorskip for mailwatcher/playwright test files
+- **81 tests pass** - All unit and integration tests passing
+- **162 skipped** - Mailwatcher/playwright tests skipped in API container (separate services)
+
+#### DockerHub Images
+- **All services** - API, frontend, playwright, mailwatcher images on DockerHub
+- **Versioned tags** - Both 1.04 and latest tags for each image
+- **DockerHub repo** - vnmyers13/homeguard-api, vnmyers13/homeguard-frontend, etc.
+
+---
+
+### API Endpoints Added
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | /auth/forgot-password | public | Generate password reset code |
+| POST | /auth/verify-code | public | Verify reset code |
+| POST | /auth/reset-password | public | Reset password with code |
+| POST | /profiles/batch | required | Batch create profiles |
+
+---
+
+### Changes
+- **docker-compose.yml** - Updated all services to use DockerHub images (`vnmyers13/homeguard-*:1.04`)
+- **Test imports** - Fixed mailwatcher/playwright test imports for container compatibility
+- **Version bump** - 1.03 → 1.04
+
+---
+
+### Migration Notes
+- **Password reset tokens** - New `password_reset_tokens` table added to `auth` schema
+- **Batch operations** - Rate limiting: max 100 profiles per batch request
+
+---
+
 ## Version 1.02 - Removal Request Tracking & Real-Time Progress (2026-06-13)
 
 ### Overview
