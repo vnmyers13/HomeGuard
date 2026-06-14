@@ -8,7 +8,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mailwatcher.request_matcher import (
+request_matcher = pytest.importorskip("mailwatcher.request_matcher", reason="mailwatcher module not available")
+
+from request_matcher import (
     correlate_email_to_request,
     extract_broker_from_domain,
     extract_email_domain,

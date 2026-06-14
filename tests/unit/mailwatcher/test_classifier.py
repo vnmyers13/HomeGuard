@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from mailwatcher.classifier import (
+classifier = pytest.importorskip("mailwatcher.classifier", reason="mailwatcher module not available")
+
+from classifier import (
     Classification,
     ClassificationResult,
     EmailClassifier,

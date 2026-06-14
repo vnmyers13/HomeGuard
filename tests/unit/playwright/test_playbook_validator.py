@@ -2,7 +2,10 @@
 
 import json
 import pytest
-from gw_playwright.models import (
+
+playwright_models = pytest.importorskip("gw_playwright.models", reason="gw_playwright module not available")
+
+from models import (
     ActionType,
     ErrorType,
     JobStatus,

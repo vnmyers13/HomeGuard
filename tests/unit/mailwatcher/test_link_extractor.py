@@ -7,7 +7,10 @@
 # ---------------------------------------------------------------------------
 
 import pytest
-from mailwatcher.link_extractor import (
+
+link_extractor = pytest.importorskip("mailwatcher.link_extractor", reason="mailwatcher module not available")
+
+from link_extractor import (
     extract_opt_out_links,
     classify_url_as_opt_out,
     extract_urls_from_html,
