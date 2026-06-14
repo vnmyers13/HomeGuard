@@ -1,5 +1,74 @@
 # HomeGuard Release Notes
 
+## Version 1.07 - Security Hardening, Operations & Final Sign-off (2026-06-14)
+
+### Overview
+Sprint 7 is the final sprint. It delivers host security hardening (UFW, fail2ban, GPG backup), a 12-check security verification suite, automated backup configuration, 13 critical path integration tests, and the first household member seed script. This release marks HomeGuard as production-ready.
+
+### New Features
+
+#### Host Security Hardening
+- **UFW firewall script** - Configures default deny, SSH/HTTP/HTTPS rules, logging
+- **Fail2Ban configuration** - SSH jail (3 retries/5min), API auth jail (10 retries/5min)
+- **System hardening** - Kernel parameters, umask, unused service disabling, log directory security
+- **GPG backup** - Encrypted backups of .env, playbooks, workflows, database dumps
+- **Cron schedule** - Daily 2:00 AM automated backups with 7-day retention
+
+#### Security Verification Suite
+- **12 security checks** covering:
+  - CP-SE01: UFW firewall active
+  - CP-SE02: Fail2Ban SSH jail running
+  - CP-SE03: PII encrypted at rest (pgcrypto)
+  - CP-SE04: JWT never in localStorage
+  - CP-SE05: Audit log append-only
+  - CP-SE06: HMAC webhook verification
+  - CP-SE07: Rate limiting on auth endpoints
+  - CP-SE08: bcrypt password hashing
+  - CP-SE09: .env files excluded from git
+  - CP-SE10: SSL/TLS termination configured
+  - CP-SE11: Docker images pinned to versions
+  - CP-SE12: Backup script and cron configured
+- **JSON output** - `--json` flag for CI/CD integration
+- **Fail-fast mode** - `--fail-fast` for quick validation
+
+#### Critical Path Integration Tests
+- **13 critical paths** verified via pytest:
+  - CP-01: Docker stack health (all 9 services Up)
+  - CP-02: Full scan to web form removal end-to-end
+  - CP-03: Email confirmed removal triggers verification schedule
+  - CP-04: Verification scan detects relisting
+  - CP-05: Followup escalates after 3 attempts
+  - CP-07: PII encryption round-trip
+  - CP-08: Audit log append-only immutability
+  - CP-10: JWT never stored in localStorage
+  - CP-11: Complete onboarding wizard (5 steps)
+  - CP-12: Profile deletion triggers archive transaction
+  - CP-13: Webhook HMAC verification rejects invalid signatures
+  - CP-14: Rate limiting on auth endpoints
+  - CP-15: Broker playbook validation
+  - CP-16: Celery task pipeline state management
+
+#### First Household Member Seed
+- **seed_first_household.py** - Creates admin user, household, and profile
+- **Database seeding** - Verifies broker count and household stats
+- **Usage**: `docker compose run --rm api python scripts/seed_first_household.py`
+
+### Files Added
+| File | Description |
+|------|-------------|
+| `scripts/host_security.sh` | UFW, fail2ban, system hardening, GPG backup, cron setup |
+| `scripts/security_verification.py` | 12 security verification checks |
+| `scripts/backup.sh` | Encrypted backup with verify/restore modes |
+| `scripts/seed_first_household.py` | First household member seed script |
+| `tests/integration/test_critical_paths.py` | 13 critical path integration tests |
+
+### Changes
+- **Version bump** - 1.06 → 1.07
+- **README** - Updated to HomeGuard branding with version
+- **Documentation** - progress.md and activeContext.md updated for Sprint 7
+
+---
+
 ## Version 1.06 - Frontend Pages, E2E Tests & Complete Test Suite (2026-06-14)
 
 ### Overview

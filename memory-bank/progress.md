@@ -495,3 +495,47 @@ Full dashboard coverage with Reports, System Health, Settings pages. Onboarding 
 - [x] Tag v1.06 created
 - [x] Release published on Gitea
 - [x] Post-release verification passed
+
+## Sprint 7 - Security Hardening & Final Sign-off (2026-06-14)
+Final sprint. Host security hardening, 12-check security verification suite, automated backups, 13 critical path tests, and first household member seed.
+
+### What Works
+- **Host security** - UFW firewall, fail2ban SSH/API jails, system hardening, GPG backup, cron schedule
+- **Security verification** - 12 automated checks (CP-SE01 through CP-SE12) with JSON output
+- **Backup system** - Encrypted backups with verify/restore modes, daily cron schedule
+- **Critical path tests** - 13 integration tests covering CP-01 through CP-16
+- **First household seed** - Admin user, household, and profile creation script
+
+### Security Checks (12)
+| Check | ID | Description | Category |
+|-------|----|-------------|----------|
+| UFW active | CP-SE01 | Firewall is enabled | Firewall |
+| Fail2Ban running | CP-SE02 | SSH jail active | Intrusion Prevention |
+| PII encrypted | CP-SE03 | pgcrypto extension enabled | Data Protection |
+| No localStorage JWT | CP-SE04 | Tokens not in localStorage | Frontend Security |
+| Audit log immutable | CP-SE05 | Delete/update blocked | Audit & Compliance |
+| HMAC verification | CP-SE06 | Constant-time comparison | API Security |
+| Rate limiting | CP-SE07 | Auth endpoints rate limited | API Security |
+| bcrypt hashing | CP-SE08 | Passwords hashed with bcrypt | Authentication |
+| .env not committed | CP-SE09 | Secrets excluded from git | Configuration |
+| SSL/TLS configured | CP-SE10 | HTTPS termination | Transport Security |
+| Pinned images | CP-SE11 | Docker images versioned | Infrastructure |
+| Backup configured | CP-SE12 | Backup script exists | Disaster Recovery |
+
+### Critical Paths Tested (13)
+| Path | Description |
+|------|-------------|
+| CP-01 | Docker stack health (all 9 services Up) |
+| CP-02 | Full scan to web form removal end-to-end |
+| CP-03 | Email confirmed removal triggers verification schedule |
+| CP-04 | Verification scan detects relisting |
+| CP-05 | Followup escalates after 3 attempts |
+| CP-07 | PII encryption round-trip |
+| CP-08 | Audit log append-only immutability |
+| CP-10 | JWT never stored in localStorage |
+| CP-11 | Complete onboarding wizard (5 steps) |
+| CP-12 | Profile deletion triggers archive transaction |
+| CP-13 | Webhook HMAC verification rejects invalid signatures |
+| CP-14 | Rate limiting blocks excessive auth attempts |
+| CP-15 | Broker playbook validation prevents malformed playbooks |
+| CP-16 | Celery task pipeline maintains state across stages |
