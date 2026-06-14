@@ -64,8 +64,13 @@ Sprint 1 delivered the project foundation: Docker Compose scaffold with 9 servic
 - Playwright service runs on port 8001 within Docker network
 - Components should be extracted early for reusability
 - vitest config needs jsdom environment for React component testing
+- All JSX source files need `import React from 'react'` for vitest/jsdom compatibility
+- vitest include pattern must exclude e2e/ directory (use `tests/unit/**/*.test.{js,jsx,ts,tsx}`)
+- Test fixes: use `../../../src/` import paths from deeply nested test files, use `@testing-library/jest-dom` matchers via test-utils setupFile
 
-## Next Immediate Steps - Sprint 7
+## Next Immediate Steps - Sprint 7 (Final Sprint)
+**Sprint 6 is complete** — all dashboard pages, Onboarding wizard, component library, test suite, and v1.06 release are done.
+
 - **S7-T1**: Apply host security hardening — UFW, fail2ban, GPG backup
 - **S7-T2**: Run all 12 security verification checks
 - **S7-T3**: Configure backup schedule and verify restore

@@ -461,3 +461,37 @@ First production-ready release. Fixes 8 critical bugs preventing reliable operat
 - [x] Gitea repository created (Vernon/homeguard on 192.168.10.101:3002)
 - [x] Release checklist established (9-phase process in release_checklist.json)
 - [x] Release notes documented (RELEASE_NOTES.md)
+
+## Release 1.06 - Sprint 6: Frontend Pages, E2E Tests & Complete Test Suite (2026-06-14)
+Full dashboard coverage with Reports, System Health, Settings pages. Onboarding wizard with 5-step flow. Shared component library (7 components). Vitest test suite (59 unit tests) and Playwright E2E tests (30+ tests).
+
+### New Features
+- **Reports page** - Exposure trends chart, broker summary table, removal statistics (Recharts)
+- **System Health page** - Service status grid, disk usage monitoring, alert display
+- **Settings page** - Notification preferences, account settings, data retention (3 tabs)
+- **Onboarding wizard** - 5-step flow: Welcome → Household → Profile → Email → First Scan
+- **Component library** - StatusBadge, ScoreGauge, Card, Modal, EmptyState, DataTable, ScanProgress
+- **Vitest setup** - jsdom environment, 75% coverage threshold, 59 passing unit tests
+- **Playwright E2E** - 7 test suites covering auth, onboarding, dashboard, profiles, requests, scans, settings
+
+### Changes
+- Version bump: 1.05 → 1.06
+- App routes: Added Reports, SystemHealth, Settings, Onboarding
+- DashboardLayout: Added Reports, Notifications, System Health nav links
+- API client: Added request, report, system endpoints
+- All JSX files: Added `import React from 'react'` for vitest/jsdom compatibility
+
+### Test Results
+- 59 unit tests - All passing
+- 30+ E2E tests - 7 Playwright test suites
+- Vitest coverage threshold: 75%
+
+### Release Pipeline
+- [x] All gate checks passed
+- [x] Test suite verification passed (59/59 unit tests, 0 syntax errors)
+- [x] Version bumped to 1.06
+- [x] Documentation updated (README, .env.example, RELEASE_NOTES.md)
+- [x] Pushed to Gitea and GitHub
+- [x] Tag v1.06 created
+- [x] Release published on Gitea
+- [x] Post-release verification passed
