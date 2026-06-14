@@ -48,3 +48,25 @@ class ProfileUpdate(BaseModel):
 class ProfileDeleteResponse(BaseModel):
     message: str
     archived_profile_id: Optional[str] = None
+
+
+class ProfileBatchCreate(BaseModel):
+    """Schema for batch profile creation."""
+    profiles: List[ProfileCreate] = Field(..., min_length=1, max_length=100)
+
+
+class BatchCreateResult(BaseModel):
+    """Result for a single profile in a batch operation."""
+    index: int
+    success: bool
+    profile_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class BatchCreateResponse(BaseModel):
+    """Response for batch profile creation."""
+    success: bool
+    total: int
+    created: int
+    failed: int
+    results: List[BatchCreateResult]

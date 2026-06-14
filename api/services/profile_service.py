@@ -249,3 +249,56 @@ class ProfileService:
         # Base score: 10 points per field, 5 per alias (max 100)
         score = min(100.0, (field_count * 10 + alias_count * 5))
         return round(score, 2)
+
+    async def batch_create_profiles(
+        self,
+        profiles_data: List[ProfileCreate],
+        household_id: Optional[uuid.UUID],
+        user_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> dict:
+        """Batch create profiles. Returns summary with per-profile results."""
+        results = []
+        created = 0
+        failed = 0
+
+        for idx, data in enumerate(profiles_data):
+            try:
+                encrypted_name = self.encryption.encrypt(data.full_legal_name)
+
+                profile = Profile(
+                    id=uuid.uuid4(),
+                    household_id=household_id,
+                    owner_id=user_id,
+                    full_legal_name_encrypted=encrypted_name,
+                    date_of_birth=data.date_of_birth,
+                    display_name=data.full_legal_name.split()[0] if data.full_legal_name else "User",
+                    is_admin=False,
+                    exposure_score=0.0,
+                )
+
+                session.add(profile)
+                await session.flush()
+                created += 1
+                results.append(BatchCreateResult(
+                    index=idx,
+                    success=True,
+                    profile_id=str(profile.id),
+                ))
+            except Exception as e:
+                failed += 1
+                results.append(BatchCreateResult(
+                    index=idx,
+                    success=False,
+                    error=str(e),
+                ))
+
+        await session.commit()
+
+        return {
+            "success": failed == 0,
+            "total": len(profiles_data),
+            "created": created,
+            "failed": failed,
+            "results": results,
+        }

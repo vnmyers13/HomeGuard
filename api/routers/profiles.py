@@ -19,6 +19,8 @@ from schemas.profile import (
     ProfileCreate,
     ProfileResponse,
     ProfileUpdate,
+    ProfileBatchCreate,
+    BatchCreateResponse,
 )
 from services.profile_service import ProfileService
 
@@ -99,3 +101,20 @@ async def delete_profile(
 ):
     """Soft-delete a profile by setting active=False."""
     return await svc.delete(profile_id)
+
+
+@router.post("/profiles/batch", status_code=status.HTTP_201_CREATED)
+async def batch_create_profiles(
+    payload: ProfileBatchCreate,
+    svc: ProfileService = Depends(get_profile_service),
+    session=Depends(get_session),
+):
+    """Batch create multiple profiles. Max 100 profiles per request."""
+    import uuid
+    result = await svc.batch_create_profiles(
+        profiles_data=payload.profiles,
+        household_id=None,
+        user_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),  # Will be replaced by auth
+        session=session,
+    )
+    return result
