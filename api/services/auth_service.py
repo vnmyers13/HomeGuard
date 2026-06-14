@@ -11,13 +11,14 @@ from fastapi import Depends, Header, HTTPException, status
 from passlib.context import CryptContext
 
 from database import get_session
-from models.auth import User, Session as UserModelSession
+from models.auth import User, Session as UserModelSession, PasswordResetToken
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET = os.environ.get("JWT_SECRET", "CHANGE_ME_jwt_secret_key_at_least_32_chars")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_MINUTES = 60
 RESET_CODE_EXPIRY_MINUTES = 15
+RESET_TOKEN_SECRET = os.environ.get("RESET_TOKEN_SECRET", JWT_SECRET)
 
 
 # --- Password helpers ---
@@ -161,3 +162,132 @@ class AuthService:
     def verify(user: User) -> dict:
         """Verify current user from token. Called via get_current_user dependency."""
         return {"user": user}
+
+    @staticmethod
+    def generate_code(email: str, session) -> dict:
+        """Generate a 6-digit reset code for the given email. Returns code info."""
+        from database import get_session as _gs
+        if session is None:
+            session = next(_gs())
+
+        # Invalidate any existing unused codes for this email
+        session.query(PasswordResetToken).filter(
+            PasswordResetToken.email == email,
+            PasswordResetToken.used == False,
+        ).update({"used": True})
+
+        code = str(random.randint(100000, 999999))
+        token = str(uuid.uuid4())
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_CODE_EXPIRY_MINUTES)
+
+        reset_token = PasswordResetToken(
+            email=email,
+            code=code,
+            token=token,
+            expires_at=expires_at,
+        )
+        session.add(reset_token)
+        session.commit()
+
+        return {
+            "email": email,
+            "code": code,
+            "token": token,
+            "expires_at": expires_at,
+        }
+
+    @staticmethod
+    def create_magic_link(email: str, session) -> dict:
+        """Create a magic link token for the given email. Returns token info."""
+        from database import get_session as _gs
+        if session is None:
+            session = next(_gs())
+
+        # Invalidate any existing unused codes for this email
+        session.query(PasswordResetToken).filter(
+            PasswordResetToken.email == email,
+            PasswordResetToken.used == False,
+        ).update({"used": True})
+
+        token = str(uuid.uuid4())
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=RESET_CODE_EXPIRY_MINUTES)
+
+        reset_token = PasswordResetToken(
+            email=email,
+            code="",
+            token=token,
+            expires_at=expires_at,
+        )
+        session.add(reset_token)
+        session.commit()
+
+        return {
+            "email": email,
+            "token": token,
+            "expires_at": expires_at,
+        }
+
+    @staticmethod
+    def verify_magic_link(token: str, new_password: str, session) -> dict:
+        """Verify a magic link token and reset the password. Returns success info."""
+        from database import get_session as _gs
+        if session is None:
+            session = next(_gs())
+
+        reset_token = session.query(PasswordResetToken).filter(
+            PasswordResetToken.token == token,
+            PasswordResetToken.used == False,
+            PasswordResetToken.expires_at > datetime.now(timezone.utc),
+        ).first()
+
+        if not reset_token:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+
+        user = session.query(User).filter(User.email == reset_token.email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="No account found with this email")
+
+        user.password_hash = hash_password(new_password)
+        reset_token.used = True
+        session.commit()
+
+        # Revoke all existing sessions for this user
+        session.query(UserModelSession).filter(
+            UserModelSession.user_id == user.id,
+            UserModelSession.revoked_at.is_(None),
+        ).update({"revoked_at": datetime.now(timezone.utc)})
+
+        return {"success": True, "message": "Password reset successfully"}
+
+    @staticmethod
+    def reset_password_with_code(email: str, code: str, new_password: str, session) -> dict:
+        """Reset password using a 6-digit code. Returns success info."""
+        from database import get_session as _gs
+        if session is None:
+            session = next(_gs())
+
+        reset_token = session.query(PasswordResetToken).filter(
+            PasswordResetToken.email == email,
+            PasswordResetToken.code == code,
+            PasswordResetToken.used == False,
+            PasswordResetToken.expires_at > datetime.now(timezone.utc),
+        ).first()
+
+        if not reset_token:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset code")
+
+        user = session.query(User).filter(User.email == email).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="No account found with this email")
+
+        user.password_hash = hash_password(new_password)
+        reset_token.used = True
+        session.commit()
+
+        # Revoke all existing sessions for this user
+        session.query(UserModelSession).filter(
+            UserModelSession.user_id == user.id,
+            UserModelSession.revoked_at.is_(None),
+        ).update({"revoked_at": datetime.now(timezone.utc)})
+
+        return {"success": True, "message": "Password reset successfully"}

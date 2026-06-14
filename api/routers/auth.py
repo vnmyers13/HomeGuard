@@ -11,6 +11,10 @@ from schemas.auth import (
     LoginResponse,
     VerifyResponse,
     LogoutRequest,
+    ForgotPasswordRequest,
+    VerifyCodeRequest,
+    ResetPasswordRequest,
+    PasswordResetResponse,
 )
 from services.auth_service import AuthService, get_current_user
 from database import get_session
@@ -107,3 +111,62 @@ def change_password(
         "success": True,
         "message": "Password changed successfully",
     }
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+def forgot_password(body: ForgotPasswordRequest, session=None):
+    """Generate a password reset code for the given email."""
+    try:
+        from services.auth_service import AuthService
+        result = AuthService.generate_code(body.email, session)
+        # In production, send the code via email. For now, return it in the response.
+        return {
+            "success": True,
+            "message": "Reset code generated",
+            "data": {
+                "email": result["email"],
+                "expires_in_minutes": 15,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/verify-code", status_code=status.HTTP_200_OK)
+def verify_code(body: VerifyCodeRequest, session=None):
+    """Verify the reset code and return a token for password reset."""
+    try:
+        from services.auth_service import AuthService
+        reset_token = AuthService.generate_code(body.email, session)
+        if reset_token["code"] != body.code:
+            raise HTTPException(status_code=400, detail="Invalid reset code")
+        return {
+            "success": True,
+            "message": "Code verified",
+            "data": {
+                "token": reset_token["token"],
+                "expires_at": reset_token["expires_at"],
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(body: ResetPasswordRequest, session=None):
+    """Reset the password using a verified code or token."""
+    try:
+        from services.auth_service import AuthService
+        result = AuthService.reset_password_with_code(body.email, body.code, body.new_password, session)
+        return {
+            "success": True,
+            "message": result["message"],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

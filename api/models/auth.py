@@ -82,3 +82,19 @@ class Notification(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     user = relationship("User", back_populates="notifications")
+
+
+class PasswordResetToken(Base):
+    """
+    One-time password reset tokens generated via forgot-password flow.
+    """
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = {"schema": "auth"}
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    email = Column(Text, nullable=False)
+    code = Column(Text, nullable=False)
+    token = Column(Text, nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
