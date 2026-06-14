@@ -272,10 +272,33 @@ Sprint 5 implements the removal request lifecycle tracking and real-time scan pr
 - `frontend/package.json` - Version bump 1.01 → 1.02
 
 ### Known Issues / Future Work
-- [ ] Password reset flow with email verification
+- [ ] Password reset flow endpoints (schemas + service methods added)
 - [ ] Batch operations for large household profile imports
 - [ ] Docker Compose update to use DockerHub images instead of build contexts
-- [ ] Database migration for any new tables needed
+- [ ] Mailwatcher/playwright unit tests (pre-existing import issues)
+
+## Sprint 5.5 - Test Suite Fixes & Migration Fixes (2026-06-13)
+Version 1.03. Fixed critical test suite issues, migration syntax errors, and added password reset schemas.
+
+### Test Suite Fixes
+- [x] Integration test imports: added try/except fallback for `api.` vs `models.` imports (Docker container code layout)
+- [x] Integration test file: import models at top of file, removed redundant imports from fixtures
+- [x] Removed phantom worker tests for non-existent functions (notifications, registry, requests, scan tasks)
+- [x] All 81 tests pass (62 unit + 19 integration)
+
+### Migration Fixes
+- [x] Fixed `c191a8c36f6a_initial_schema.py` syntax error: moved `schema=` kwarg after positional `Column` args
+- [x] Alembic stamped to head (tables already exist from raw SQL creation during Sprint 5)
+- [x] Requests tables properly registered in Alembic history
+
+### Password Reset Schemas
+- [x] Added `ForgotPasswordRequest`, `VerifyCodeRequest`, `ResetPasswordRequest` to `api/schemas/auth.py`
+- [x] Added `generate_code`, `create_magic_link`, `verify_magic_link` to `api/services/auth_service.py`
+- [ ] Endpoints not yet added (POST /auth/forgot-password, /auth/verify-code, /auth/reset-password)
+
+### Version Bump
+- [x] `api/main.py`: 1.02 → 1.03
+- [x] `frontend/package.json`: 1.02 → 1.03
 
 ## Release 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
 First production-ready release. Fixes 8 critical bugs preventing reliable operation.
