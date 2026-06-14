@@ -30,16 +30,17 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # auth.auth_profiles
     # -----------------------------------------------------------
-    op.create_table('auth_profiles', schema='auth',
+    op.create_table('auth_profiles',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('username', sa.String(255), nullable=False),
         sa.Column('email', sa.String(255), nullable=False),
         sa.Column('password_hash', sa.Text(), nullable=False),
-        sa.Column('role', sa.String(50), server_default='user', nullable=False),
+        sa.Column('role', sa.String(50), server_default=sa.text("'user'"), nullable=False),
         sa.Column('active', sa.Boolean(), server_default=sa.text('true'), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.PrimaryKeyConstraint('id', name=op.f('pk_auth_profiles')),
+        schema='auth',
     )
     op.create_unique_constraint(op.f('uq_auth_profiles_username'), 'auth_profiles', ['username'], schema='auth')
     op.create_unique_constraint(op.f('uq_auth_profiles_email'), 'auth_profiles', ['email'], schema='auth')
@@ -49,7 +50,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # identity.personal_identity
     # -----------------------------------------------------------
-    op.create_table('personal_identity', schema='identity',
+    op.create_table('personal_identity',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid(), nullable=False),
         sa.Column('first_name', sa.String(100)),
@@ -68,7 +69,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # registry.broker_playbooks
     # -----------------------------------------------------------
-    op.create_table('broker_playbooks', schema='registry',
+    op.create_table('broker_playbooks',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('broker_domain', sa.String(255), nullable=False),
         sa.Column('display_name', sa.String(255)),
@@ -86,7 +87,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # scanning.scan_tasks
     # -----------------------------------------------------------
-    op.create_table('scan_tasks', schema='scanning',
+    op.create_table('scan_tasks',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid(), nullable=False),
         sa.Column('broker_domain', sa.String(255)),
@@ -106,7 +107,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # requests.api_request_logs
     # -----------------------------------------------------------
-    op.create_table('api_request_logs', schema='requests',
+    op.create_table('api_request_logs',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid(), nullable=False),
         sa.Column('method', sa.String(10)),
@@ -124,7 +125,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # mail.incoming_mail
     # -----------------------------------------------------------
-    op.create_table('incoming_mail', schema='mail',
+    op.create_table('incoming_mail',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid(), nullable=False),
         sa.Column('subject', sa.String(500)),
@@ -143,7 +144,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # audit.audit_logs
     # -----------------------------------------------------------
-    op.create_table('audit_logs', schema='audit',
+    op.create_table('audit_logs',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid()),
         sa.Column('action', sa.String(100), nullable=False),
@@ -160,7 +161,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # reporting.generated_reports
     # -----------------------------------------------------------
-    op.create_table('generated_reports', schema='reporting',
+    op.create_table('generated_reports',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid(), nullable=False),
         sa.Column('report_type', sa.String(50), nullable=False),
@@ -175,7 +176,7 @@ def upgrade() -> None:
     # -----------------------------------------------------------
     # archive.archived_documents
     # -----------------------------------------------------------
-    op.create_table('archived_documents', schema='archive',
+    op.create_table('archived_documents',
         sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
         sa.Column('profile_id', sa.Uuid(), nullable=False),
         sa.Column('document_type', sa.String(50), nullable=False),

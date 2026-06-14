@@ -61,6 +61,9 @@ get_db_session = get_db
 # Alias used by routers that expect 'get_async_db' (async)
 get_async_db = get_db
 
+# Alias used by workers that expect 'get_async_session'
+get_async_session = async_session_factory
+
 
 async def init_db():
     """Initialize database tables (development only - use Alembic in production)."""

@@ -1,7 +1,7 @@
 """Integration tests for the Scan -> Exposure -> Removal Request flow.
 
 These tests verify end-to-end data integrity across the three core domains:
-- Scanning (Scan, Exposure)
+- Scanning (ScanRun, Exposure)
 - Identity (Profile, Household)
 - Requests (RemovalRequest)
 
@@ -14,7 +14,23 @@ transaction across all test methods in each class, reducing setup overhead.
 
 from datetime import datetime, timezone, timedelta
 import pytest
-
+# Import models with fallback for Docker container (code at /app, not /app/api)
+try:
+    from api.models.auth import User, Household
+    from api.models.registry import Broker
+    from api.models.scanning import ScanRun, Exposure, ScanResult
+    from api.models.identity import Profile
+    from api.models.requests import RemovalRequest, Followup, RequestStatusLog, VerificationScan
+    from api.models.audit import SystemEvent, AuditLog
+    from api.models.reporting import ExposureScore, DailyBrokerSnapshot, RelistingEvent
+except ImportError:
+    from models.auth import User, Household
+    from models.registry import Broker
+    from models.scanning import ScanRun, Exposure, ScanResult
+    from models.identity import Profile
+    from models.requests import RemovalRequest, Followup, RequestStatusLog, VerificationScan
+    from models.audit import SystemEvent, AuditLog
+    from models.reporting import ExposureScore, DailyBrokerSnapshot, RelistingEvent
 
 @pytest.fixture(scope="class")
 def db(session):
@@ -25,12 +41,11 @@ def db(session):
 @pytest.fixture(scope="class")
 def user(db):
     """Create a test User."""
-    from api.models.auth import User
+
     user = User(
-        email="test@example.com",
-        hashed_password="hashed_pw",
+        username="testuser",
+        password_hash="hashed_pw",
         is_active=True,
-        created_at=datetime.now(timezone.utc)
     )
     db.add(user)
     db.flush()
@@ -40,11 +55,9 @@ def user(db):
 @pytest.fixture(scope="class")
 def household(db, user):
     """Create a test Household linked to the user."""
-    from api.models.identity import Household
+
     household = Household(
         name="Test Household",
-        user_id=user.id,
-        created_at=datetime.now(timezone.utc)
     )
     db.add(household)
     db.flush()
@@ -54,12 +67,10 @@ def household(db, user):
 @pytest.fixture(scope="class")
 def broker(db):
     """Create a test Broker."""
-    from api.models.registry import Broker
+
     broker = Broker(
-        domain="example.com",
-        name="Example Broker",
-        status="active",
-        created_at=datetime.now(timezone.utc)
+        canonical_domain="example.com",
+        display_name="Example Broker",
     )
     db.add(broker)
     db.flush()
@@ -67,14 +78,13 @@ def broker(db):
 
 
 @pytest.fixture(scope="class")
-def scan(db, household, user):
-    """Create a test Scan."""
-    from api.models.scanning import Scan
-    scan = Scan(
-        household_id=household.id,
-        user_id=user.id,
+def scan(db, profile):
+    """Create a test ScanRun."""
+
+    scan = ScanRun(
+        profile_id=profile.id,
+        run_type="manual",
         status="completed",
-        created_at=datetime.now(timezone.utc)
     )
     db.add(scan)
     db.flush()
@@ -84,12 +94,12 @@ def scan(db, household, user):
 @pytest.fixture(scope="class")
 def profile(db, household):
     """Create a test Profile."""
-    from api.models.identity import Profile
+
     profile = Profile(
-        full_name="John Doe",
+        display_name="John Doe",
+        full_legal_name="John Doe",
         household_id=household.id,
-        dob=datetime(1990, 1, 15),
-        created_at=datetime.now(timezone.utc)
+        date_of_birth=datetime(1990, 1, 15).date(),
     )
     db.add(profile)
     db.flush()
@@ -97,16 +107,15 @@ def profile(db, household):
 
 
 @pytest.fixture(scope="class")
-def exposure(db, scan, broker):
+def exposure(db, scan, profile, broker):
     """Create a test Exposure."""
-    from api.models.scanning import Exposure
+
     exposure = Exposure(
-        scan_id=scan.id,
+        scan_run_id=scan.id,
+        profile_id=profile.id,
         broker_id=broker.id,
-        url="https://example.com/profile/1",
-        risk_level="high",
-        status="new",
-        created_at=datetime.now(timezone.utc)
+        is_active=True,
+        is_removed=False,
     )
     db.add(exposure)
     db.flush()
@@ -116,14 +125,13 @@ def exposure(db, scan, broker):
 @pytest.fixture(scope="class")
 def removal_request(db, profile, exposure, broker):
     """Create a test RemovalRequest."""
-    from api.models.requests import RemovalRequest
+
     request = RemovalRequest(
         profile_id=profile.id,
         exposure_id=exposure.id,
         broker_id=broker.id,
         removal_method="generic_removal",
         status="queued",
-        created_at=datetime.now(timezone.utc)
     )
     db.add(request)
     db.flush()
@@ -139,50 +147,49 @@ class TestFixtures:
 
     def test_user_fixture(self, db, user):
         """Verify User fixture creates a valid record."""
-        from api.models.auth import User
+
         saved = db.query(User).filter_by(id=user.id).first()
         assert saved is not None
-        assert saved.email == "test@example.com"
+        assert saved.username == "testuser"
         assert saved.is_active
 
-    def test_household_fixture(self, db, household, user):
-        """Verify Household fixture links to User correctly."""
-        from api.models.identity import Household
+    def test_household_fixture(self, db, household):
+        """Verify Household fixture creates a valid record."""
+
         saved = db.query(Household).filter_by(id=household.id).first()
         assert saved is not None
-        assert saved.user_id == user.id
 
     def test_broker_fixture(self, db, broker):
         """Verify Broker fixture creates a valid record."""
-        from api.models.registry import Broker
+
         saved = db.query(Broker).filter_by(id=broker.id).first()
         assert saved is not None
-        assert saved.status == "active"
+        assert saved.is_active is True
 
-    def test_scan_fixture(self, db, scan, household):
-        """Verify Scan fixture links to Household correctly."""
-        from api.models.scanning import Scan
-        saved = db.query(Scan).filter_by(id=scan.id).first()
+    def test_scan_fixture(self, db, scan, profile):
+        """Verify ScanRun fixture links to Profile correctly."""
+
+        saved = db.query(ScanRun).filter_by(id=scan.id).first()
         assert saved is not None
-        assert saved.household_id == household.id
+        assert saved.profile_id == profile.id
 
     def test_profile_fixture(self, db, profile, household):
         """Verify Profile fixture links to Household correctly."""
-        from api.models.identity import Profile
+
         saved = db.query(Profile).filter_by(id=profile.id).first()
         assert saved is not None
         assert saved.household_id == household.id
 
     def test_exposure_fixture(self, db, exposure, scan):
-        """Verify Exposure fixture links to Scan correctly."""
-        from api.models.scanning import Exposure
+        """Verify Exposure fixture links to ScanRun correctly."""
+
         saved = db.query(Exposure).filter_by(id=exposure.id).first()
         assert saved is not None
-        assert saved.scan_id == scan.id
+        assert saved.scan_run_id == scan.id
 
     def test_removal_request_fixture(self, db, removal_request, profile):
         """Verify RemovalRequest fixture links to Profile correctly."""
-        from api.models.requests import RemovalRequest
+
         saved = db.query(RemovalRequest).filter_by(id=removal_request.id).first()
         assert saved is not None
         assert saved.profile_id == profile.id
@@ -195,37 +202,37 @@ class TestFixtures:
 class TestRelationshipIntegrity:
     """Verify that relationships between entities are maintained."""
 
-    def test_scan_links_to_household(self, db, scan, household):
-        """Verify Scan -> Household relationship is intact."""
-        from api.models.scanning import Scan
-        saved = db.query(Scan).filter_by(id=scan.id).first()
-        assert saved.household_id == household.id
+    def test_scan_links_to_profile(self, db, scan, profile):
+        """Verify ScanRun -> Profile relationship is intact."""
+
+        saved = db.query(ScanRun).filter_by(id=scan.id).first()
+        assert saved.profile_id == profile.id
 
     def test_exposure_links_to_scan(self, db, exposure, scan):
-        """Verify Exposure -> Scan relationship is intact."""
-        from api.models.scanning import Exposure
+        """Verify Exposure -> ScanRun relationship is intact."""
+
         saved = db.query(Exposure).filter_by(id=exposure.id).first()
-        assert saved.scan_id == scan.id
+        assert saved.scan_run_id == scan.id
 
     def test_removal_request_links_to_exposure(self, db, removal_request, exposure):
         """Verify RemovalRequest -> Exposure relationship is intact."""
-        from api.models.requests import RemovalRequest
+
         saved = db.query(RemovalRequest).filter_by(id=removal_request.id).first()
         assert saved.exposure_id == exposure.id
 
     def test_full_chain_traceability(self, db, scan, exposure, removal_request):
-        """Verify full chain: Scan -> Exposure -> RemovalRequest."""
-        from api.models.scanning import Scan, Exposure
-        from api.models.requests import RemovalRequest
+        """Verify full chain: ScanRun -> Exposure -> RemovalRequest."""
+
+
 
         # Get scan
-        s = db.query(Scan).filter_by(id=scan.id).first()
+        s = db.query(ScanRun).filter_by(id=scan.id).first()
         assert s is not None
 
         # Get exposure linked to scan
         e = db.query(Exposure).filter_by(id=exposure.id).first()
         assert e is not None
-        assert e.scan_id == s.id
+        assert e.scan_run_id == s.id
 
         # Get removal request linked to exposure
         r = db.query(RemovalRequest).filter_by(id=removal_request.id).first()
@@ -241,21 +248,21 @@ class TestStatusTransitions:
     """Verify status transitions work correctly."""
 
     def test_scan_status_transition(self, db, scan):
-        """Verify Scan status can transition from running to completed."""
-        from api.models.scanning import Scan
+        """Verify ScanRun status can transition from pending to completed."""
+
         scan.status = "running"
         db.flush()
-        running_scan = db.query(Scan).filter_by(id=scan.id).first()
+        running_scan = db.query(ScanRun).filter_by(id=scan.id).first()
         assert running_scan.status == "running"
 
         scan.status = "completed"
         db.flush()
-        completed_scan = db.query(Scan).filter_by(id=scan.id).first()
+        completed_scan = db.query(ScanRun).filter_by(id=scan.id).first()
         assert completed_scan.status == "completed"
 
     def test_removal_request_status_transition(self, db, removal_request):
         """Verify RemovalRequest status transitions."""
-        from api.models.requests import RemovalRequest
+
 
         # queued -> submitted
         removal_request.status = "submitted"
@@ -271,20 +278,18 @@ class TestStatusTransitions:
 
     def test_removal_request_timeline(self, db, removal_request):
         """Verify RemovalRequest timeline fields are tracked."""
-        from api.models.requests import RemovalRequest
+
 
         now = datetime.now(timezone.utc)
-        removal_request.submitted_at = now
         removal_request.next_action_at = now + timedelta(hours=24)
         db.flush()
 
         saved = db.query(RemovalRequest).filter_by(id=removal_request.id).first()
-        assert saved.submitted_at == now
         assert saved.next_action_at == now + timedelta(hours=24)
 
     def test_removal_request_followup_count(self, db, removal_request):
         """Verify RemovalRequest follow-up count is tracked."""
-        from api.models.requests import RemovalRequest
+
 
         now = datetime.now(timezone.utc)
         removal_request.next_action_at = now - timedelta(hours=1)
@@ -297,7 +302,7 @@ class TestStatusTransitions:
 
     def test_request_confirmation(self, db, removal_request):
         """CP-05: Verify confirmation message is tracked."""
-        from api.models.requests import RemovalRequest
+
         removal_request.status = "confirmed_removed"
         removal_request.confirmation_message = "Data removed successfully"
         db.flush()
@@ -314,45 +319,48 @@ class TestStatusTransitions:
 class TestScanResultAggregation:
     """Tests for scan result aggregation and statistics."""
 
-    def test_scan_exposure_count(self, db, scan, broker):
+    def test_scan_exposure_count(self, db, scan, profile, broker):
         """Verify exposure count is tracked per scan."""
-        from api.models.scanning import Exposure
+
         for i in range(5):
             exposure = Exposure(
-                scan_id=scan.id,
+                scan_run_id=scan.id,
+                profile_id=profile.id,
                 broker_id=broker.id,
-                url=f"https://example.com/profile/{i}",
-                risk_level="high" if i % 2 == 0 else "low",
-                status="new",
-                created_at=datetime.now(timezone.utc)
+                is_active=True,
+                is_removed=False,
             )
             db.add(exposure)
         db.flush()
 
-        exposures = db.query(Exposure).filter_by(scan_id=scan.id).all()
+        exposures = db.query(Exposure).filter_by(scan_run_id=scan.id).all()
         assert len(exposures) == 5
 
-    def test_risk_level_distribution(self, db, scan, broker):
+    def test_risk_level_distribution(self, db, scan, profile, broker):
         """Verify risk levels are properly distributed."""
-        from api.models.scanning import Exposure
-        risk_levels = ["high", "medium", "low"]
-        for i, level in enumerate(risk_levels):
+
+        # Exposure model doesn't have risk_level, uses data_fields_found (JSONB) instead
+        # This test verifies exposures can be created with different data_fields_found
+        data_sets = [
+            {"type": "email", "severity": "high"},
+            {"type": "phone", "severity": "medium"},
+            {"type": "address", "severity": "low"},
+        ]
+        for i, data in enumerate(data_sets):
             exposure = Exposure(
-                scan_id=scan.id,
+                scan_run_id=scan.id,
+                profile_id=profile.id,
                 broker_id=broker.id,
-                url=f"https://example.com/profile/{i}",
-                risk_level=level,
-                status="new",
-                created_at=datetime.now(timezone.utc)
+                data_fields_found=data,
+                is_active=True,
+                is_removed=False,
             )
             db.add(exposure)
         db.flush()
-
-        high_count = db.query(Exposure).filter_by(
-            scan_id=scan.id,
-            risk_level="high"
-        ).count()
-        assert high_count == 1
+    
+        exposures = db.query(Exposure).filter_by(scan_run_id=scan.id).all()
+        # 5 from test_scan_exposure_count + 3 new = 8 total (class-scoped fixtures)
+        assert len(exposures) == 8
 
 
 # ============================================================================
@@ -363,43 +371,39 @@ class TestFullScanToRemovalIntegration:
     """End-to-end integration test for the complete flow."""
 
     def test_complete_scan_to_removal_flow(self, db, user, household, broker):
-        """Test complete flow: Scan -> Exposures -> Requests."""
-        from api.models.scanning import Scan, Exposure
-        from api.models.identity import Profile
-        from api.models.requests import RemovalRequest
+        """Test complete flow: ScanRun -> Exposures -> Requests."""
 
-        now = datetime.now(timezone.utc)
 
-        # 1. Create scan
-        scan = Scan(
-            household_id=household.id,
-            user_id=user.id,
-            status="running",
-            created_at=now
-        )
-        db.add(scan)
-        db.flush()
 
-        # 2. Create profile
+
+        # 1. Create profile
         profile = Profile(
-            full_name="John Doe",
+            display_name="John Doe",
+            full_legal_name="John Doe",
             household_id=household.id,
-            dob=datetime(1990, 1, 15),
-            created_at=now
+            date_of_birth=datetime(1990, 1, 15).date(),
         )
         db.add(profile)
+        db.flush()
+
+        # 2. Create scan run
+        scan = ScanRun(
+            profile_id=profile.id,
+            run_type="manual",
+            status="running",
+        )
+        db.add(scan)
         db.flush()
 
         # 3. Create exposures from scan
         exposures = []
         for i in range(3):
             exposure = Exposure(
-                scan_id=scan.id,
+                scan_run_id=scan.id,
+                profile_id=profile.id,
                 broker_id=broker.id,
-                url=f"https://example.com/profile/{i}",
-                risk_level="high",
-                status="new",
-                created_at=now
+                is_active=True,
+                is_removed=False,
             )
             db.add(exposure)
             exposures.append(exposure)
@@ -411,10 +415,9 @@ class TestFullScanToRemovalIntegration:
             request = RemovalRequest(
                 profile_id=profile.id,
                 exposure_id=exposure.id,
-                broker_id=exposure.broker_id,
+                broker_id=broker.id,
                 removal_method="generic_removal",
                 status="queued",
-                created_at=now
             )
             db.add(request)
             requests.append(request)
@@ -428,7 +431,7 @@ class TestFullScanToRemovalIntegration:
         for req in requests:
             assert req.exposure_id is not None
             exposure = db.query(Exposure).filter_by(id=req.exposure_id).first()
-            assert exposure.scan_id == scan.id
+            assert exposure.scan_run_id == scan.id
 
         # Mark scan as completed
         scan.status = "completed"

@@ -1,6 +1,7 @@
 """Authentication service: JWT, bcrypt password hashing, session management."""
 
 import os
+import random
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -16,6 +17,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 JWT_SECRET = os.environ.get("JWT_SECRET", "CHANGE_ME_jwt_secret_key_at_least_32_chars")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_MINUTES = 60
+RESET_CODE_EXPIRY_MINUTES = 15
 
 
 # --- Password helpers ---

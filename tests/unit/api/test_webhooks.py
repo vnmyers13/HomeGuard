@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from datetime import datetime, timezone
+import asyncio
 
 
 class TestWebhookService:
@@ -10,48 +11,61 @@ class TestWebhookService:
 
     @pytest.fixture
     def mock_db(self):
-        return MagicMock(spec=AsyncMock)
+        return MagicMock()
 
-    def test_process_scan_result_not_found(self, mock_db):
+    @pytest.mark.asyncio
+    async def test_process_scan_result_not_found(self, mock_db):
         """Test process_scan_result when ScanResult doesn't exist."""
         from services.webhook_service import WebhookService
 
-        mock_db.execute.return_value.scalar_one_or_none.return_value = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
         service = WebhookService(mock_db)
-        result = service.process_scan_result({"scan_id": "nonexistent"})
+        result = await service.process_scan_result({"scan_id": "nonexistent"})
 
-        # Result is a coroutine in async, but we can check the service was created
-        assert service.db == mock_db
+        assert result == {"error": "scan_not_found"}
 
-    def test_process_removal_result_not_found(self, mock_db):
+    @pytest.mark.asyncio
+    async def test_process_removal_result_not_found(self, mock_db):
         """Test process_removal_result when RemovalRequest doesn't exist."""
         from services.webhook_service import WebhookService
 
-        mock_db.execute.return_value.scalar_one_or_none.return_value = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
         service = WebhookService(mock_db)
 
-        assert service.db == mock_db
+        result = await service.process_removal_result({"request_id": "nonexistent"})
+        assert result == {"error": "removal_request_not_found"}
 
-    def test_process_captcha_update_not_found(self, mock_db):
+    @pytest.mark.asyncio
+    async def test_process_captcha_update_not_found(self, mock_db):
         """Test process_captcha_update when ScanResult doesn't exist."""
         from services.webhook_service import WebhookService
 
-        mock_db.execute.return_value.scalar_one_or_none.return_value = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock()
         service = WebhookService(mock_db)
 
-        assert service.db == mock_db
+        result = await service.process_captcha_update({"scan_id": "nonexistent"})
+        assert result == {"error": "scan_not_found"}
 
 
 class TestWebhookSchemas:
     """Tests for webhook schema validation."""
 
     def test_scan_webhook_payload(self):
-        """Test ScanWebhookPayload schema."""
-        from schemas.webhook import ScanWebhookPayload
+        """Test WebhookScanResult schema."""
+        from schemas.webhook import WebhookScanResult
 
-        payload = ScanWebhookPayload(
+        payload = WebhookScanResult(
             scan_id="test-scan-id",
-            status="completed",
+            broker_domain="example.com",
             found_listing=True,
             data_found={"name": "John Doe", "address": "123 Main St"},
         )
@@ -59,12 +73,12 @@ class TestWebhookSchemas:
         assert payload.found_listing is True
 
     def test_scan_webhook_payload_optional_fields(self):
-        """Test ScanWebhookPayload with optional fields."""
-        from schemas.webhook import ScanWebhookPayload
+        """Test WebhookScanResult with optional fields."""
+        from schemas.webhook import WebhookScanResult
 
-        payload = ScanWebhookPayload(
+        payload = WebhookScanResult(
             scan_id="test-scan-id",
-            status="completed",
+            broker_domain="example.com",
             found_listing=False,
         )
         assert payload.scan_id == "test-scan-id"
@@ -72,48 +86,44 @@ class TestWebhookSchemas:
         assert payload.data_found is None
 
     def test_removal_webhook_payload(self):
-        """Test RemovalWebhookPayload schema."""
-        from schemas.webhook import RemovalWebhookPayload
+        """Test WebhookRemovalResult schema."""
+        from schemas.webhook import WebhookRemovalResult
 
-        payload = RemovalWebhookPayload(
+        payload = WebhookRemovalResult(
             request_id="test-request-id",
-            status="confirmed",
+            broker_domain="example.com",
             success=True,
+            status="confirmed",
             message="Data removed successfully",
         )
         assert payload.request_id == "test-request-id"
         assert payload.success is True
 
     def test_captcha_webhook_payload(self):
-        """Test CaptchaWebhookPayload schema."""
-        from schemas.webhook import CaptchaWebhookPayload
+        """Test WebhookCAPAUpdate schema."""
+        from schemas.webhook import WebhookCAPAUpdate
 
-        payload = CaptchaWebhookPayload(
+        payload = WebhookCAPAUpdate(
             scan_id="test-scan-id",
-            captcha_url="https://example.com/captcha",
+            broker_domain="example.com",
+            captcha_required=True,
         )
         assert payload.scan_id == "test-scan-id"
-        assert payload.captcha_url == "https://example.com/captcha"
+        assert payload.captcha_required is True
 
-    def test_webhook_response_schema(self):
-        """Test WebhookResponse schema."""
-        from schemas.webhook import WebhookResponse
+    def test_webhook_ack_response(self):
+        """Test WebhookAckResponse schema."""
+        from schemas.webhook import WebhookAckResponse
 
-        response = WebhookResponse(
-            success=True,
-            message="Webhook processed successfully",
-        )
-        assert response.success is True
+        response = WebhookAckResponse()
+        assert response.received is True
 
-    def test_webhook_error_response(self):
-        """Test WebhookResponse with error."""
-        from schemas.webhook import WebhookResponse
+    def test_webhook_ack_response_custom(self):
+        """Test WebhookAckResponse with custom values."""
+        from schemas.webhook import WebhookAckResponse
 
-        response = WebhookResponse(
-            success=False,
-            message="Invalid payload",
-        )
-        assert response.success is False
+        response = WebhookAckResponse(received=False)
+        assert response.received is False
 
 
 class TestWebhookServiceIntegration:
@@ -139,7 +149,6 @@ class TestWebhookServiceIntegration:
     def test_webhook_service_async_methods(self):
         """Test that webhook service methods are async."""
         from services.webhook_service import WebhookService
-        import inspect
 
         assert asyncio.iscoroutinefunction(WebhookService.process_scan_result)
         assert asyncio.iscoroutinefunction(WebhookService.process_captcha_update)

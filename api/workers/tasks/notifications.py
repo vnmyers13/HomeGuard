@@ -16,10 +16,19 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.database import get_async_session
-from api.models.auth import User
-from api.models.scanning import ScanRun
-from api.models.requests import RemovalRequest
+try:
+    from api.database import get_async_session
+    from api.models.auth import User
+    from api.models.scanning import ScanRun
+    from api.models.requests import RemovalRequest
+except ImportError:
+    from database import get_async_session
+    from models.auth import User
+    from models.scanning import ScanRun
+    from models.requests import RemovalRequest
+
+# Aliases for test compatibility
+get_db_session = get_async_session
 
 logger = logging.getLogger(__name__)
 

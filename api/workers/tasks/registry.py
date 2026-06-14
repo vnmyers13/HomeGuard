@@ -15,9 +15,19 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from workers.celery_app import celery_app
-from api.database import get_async_session
-from api.models.registry import BrokerRegistry, BrokerHealthStatus
+try:
+    from api.workers.celery_app import celery_app
+except ImportError:
+    from workers.celery_app import celery_app
+try:
+    from api.database import get_async_session
+    from api.models.registry import Broker
+except ImportError:
+    from database import get_async_session
+    from models.registry import Broker
+
+# Aliases for test compatibility
+get_db_session = get_async_session
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +52,9 @@ def check_broker_opt_out_urls():
         async with get_async_session() as session:
             # Get all active brokers with opt_out_urls
             brokers = (await session.execute(
-                select(BrokerRegistry).where(
-                    BrokerRegistry.is_active == True,
-                    BrokerRegistry.opt_out_url != None,
+                select(Broker).where(
+                    Broker.is_active == True,
+                    Broker.opt_out_url != None,
                 )
             )).scalars().all()
             
@@ -60,31 +70,18 @@ def check_broker_opt_out_urls():
                         is_reachable = resp.status_code < 400
                         
                 except Exception as e:
-                    logger.warning("Broker %s opt-out URL unreachable: %s", broker.slug, e)
+                    logger.warning("Broker %s opt-out URL unreachable: %s", broker.canonical_domain, e)
                     is_reachable = False
                 
-                # Upsert health status
-                existing = (await session.execute(
-                    select(BrokerHealthStatus).where(BrokerHealthStatus.broker_id == broker.id)
-                )).scalar_one_or_none()
-                
-                if existing:
-                    existing.is_reachable = is_reachable
-                    existing.last_checked_at = datetime.now(timezone.utc)
-                else:
-                    status = BrokerHealthStatus(
-                        broker_id=broker.id,
-                        is_reachable=is_reachable,
-                        last_checked_at=datetime.now(timezone.utc),
-                    )
-                    session.add(status)
+                # Update last_verified_at as health indicator
+                broker.last_verified_at = datetime.now(timezone.utc)
                 
                 if is_reachable:
                     reachable_count += 1
                 
                 results.append({
                     "broker_id": str(broker.id),
-                    "slug": broker.slug,
+                    "slug": broker.canonical_domain,
                     "reachable": is_reachable,
                 })
             
@@ -122,24 +119,23 @@ def upsert_broker_from_discovery(domain: str, data: dict):
     async def _run():
         async with get_async_session() as session:
             existing = (await session.execute(
-                select(BrokerRegistry).where(BrokerRegistry.slug == domain)
+                select(Broker).where(Broker.canonical_domain == domain)
             )).scalar_one_or_none()
             
             if existing:
                 # Update existing record
-                for field in ["name", "opt_out_url", "category", "base_url"]:
+                for field in ["display_name", "opt_out_url", "category"]:
                     if field in data:
                         setattr(existing, field, data[field])
                 existing.updated_at = datetime.now(timezone.utc)
                 action = "updated"
             else:
                 # Create new broker record
-                broker = BrokerRegistry(
-                    slug=domain,
-                    name=data.get("name", domain),
+                broker = Broker(
+                    canonical_domain=domain,
+                    display_name=data.get("name", domain),
                     opt_out_url=data.get("opt_out_url"),
                     category=data.get("category", "people_search"),
-                    base_url=data.get("base_url"),
                 )
                 session.add(broker)
                 action = "created"

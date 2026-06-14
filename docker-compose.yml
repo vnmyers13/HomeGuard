@@ -105,6 +105,7 @@ services:
       - ./scripts:/app/scripts:ro
       - ./migrations:/app/migrations
       - ./tests:/app/tests:ro
+      - .:/src:ro
     networks:
       - opendataremoval_net
       - opendataremoval_egress

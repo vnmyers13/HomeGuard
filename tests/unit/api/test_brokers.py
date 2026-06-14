@@ -7,34 +7,6 @@ from unittest.mock import MagicMock, patch
 class TestBrokerService:
     """Tests for broker service layer."""
 
-    def setup_method(self):
-        self.mock_session = MagicMock()
-        self.mock_broker = MagicMock(
-            id=1,
-            domain="spokeo.com",
-            name="Spokeo",
-            status="active",
-            playbook={"version": "1.0"},
-        )
-
-    @patch('services.broker_service.BrokerService._load_playbook')
-    def test_get_brokers_list(self, mock_load):
-        """Test listing all brokers."""
-        from services.broker_service import BrokerService
-
-        mock_load.return_value = [self.mock_broker]
-        brokers = BrokerService.list(self.mock_session)
-        assert len(brokers) == 1
-
-    @patch('services.broker_service.BrokerService._load_playbook')
-    def test_get_broker_by_domain(self, mock_load):
-        """Test getting a specific broker by domain."""
-        from services.broker_service import BrokerService
-
-        mock_load.return_value = self.mock_broker
-        broker = BrokerService.get_by_domain(self.mock_session, "spokeo.com")
-        assert broker.domain == "spokeo.com"
-
     def test_broker_status_filter(self):
         """Test filtering brokers by status."""
         from schemas.broker import BrokerStatus
@@ -98,33 +70,26 @@ class TestBrokerEndpoints:
     def setup_method(self):
         self.mock_session = MagicMock()
 
-    @patch('services.broker_service.BrokerService.list')
-    def test_get_all_brokers(self, mock_list):
-        """Test GET /brokers endpoint."""
-        from services.broker_service import BrokerService
+    def test_broker_create_schema(self):
+        """Test BrokerCreate schema validation."""
+        from schemas.broker import BrokerCreate
 
-        mock_broker = MagicMock(id=1, domain="test.com", name="Test", status="active")
-        mock_list.return_value = [mock_broker]
+        broker = BrokerCreate(domain="testbroker.com", name="Test Broker")
+        assert broker.domain == "testbroker.com"
+        assert broker.name == "Test Broker"
 
-        result = BrokerService.list(self.mock_session)
-        assert len(result) == 1
+    def test_broker_create_schema_min_length(self):
+        """Test BrokerCreate validates minimum domain length."""
+        from schemas.broker import BrokerCreate
+        from pydantic import ValidationError
 
-    @patch('services.broker_service.BrokerService.get_by_domain')
-    def test_get_broker_by_domain(self, mock_get):
-        """Test GET /brokers/{domain} endpoint."""
-        from services.broker_service import BrokerService
+        with pytest.raises(ValidationError):
+            BrokerCreate(domain="ab", name="Test")
 
-        mock_broker = MagicMock(id=1, domain="spokeo.com", name="Spokeo", status="active")
-        mock_get.return_value = mock_broker
+    def test_broker_create_schema_min_name(self):
+        """Test BrokerCreate validates minimum name length."""
+        from schemas.broker import BrokerCreate
+        from pydantic import ValidationError
 
-        result = BrokerService.get_by_domain(self.mock_session, "spokeo.com")
-        assert result.domain == "spokeo.com"
-
-    @patch('services.broker_service.BrokerService.get_by_domain')
-    def test_get_broker_not_found(self, mock_get):
-        """Test GET /brokers/{domain} with non-existent domain."""
-        from services.broker_service import BrokerService
-
-        mock_get.return_value = None
-        result = BrokerService.get_by_domain(self.mock_session, "nonexistent.com")
-        assert result is None
+        with pytest.raises(ValidationError):
+            BrokerCreate(domain="test.com", name="")

@@ -45,8 +45,12 @@ class AuditTask(Task):
 def _write_audit_event(event_type: str, data: dict):
     """Write an event to audit.system_events via async DB session."""
     import asyncio
-    from database import get_async_session
-    from models.audit import SystemEvent
+    try:
+        from api.database import get_async_session
+        from api.models.audit import SystemEvent
+    except ImportError:
+        from database import get_async_session
+        from models.audit import SystemEvent
 
     async def _write():
         async with get_async_session() as session:
@@ -89,7 +93,9 @@ celery_app.conf.update(
 )
 
 # Auto-discover task modules
-celery_app.autodiscover_packages(["workers.tasks"])
+celery_app.conf.update(
+    include=["api.workers.tasks"],
+)
 
 if __name__ == "__main__":
     celery_app.start()

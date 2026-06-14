@@ -72,9 +72,9 @@ GENERIC_REMOVAL_HTML_TEMPLATE = Template("""
     <div class="footer">
         <p>This is an automated request sent via OpenDataRemoval Privacy Services.</p>
     </div>
-</body>
+ </body>
 </html>
-"""))
+""")
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@ CCPA_LETTER_HTML_TEMPLATE = Template("""
     </div>
 </body>
 </html>
-"""))
+""")
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +318,7 @@ GDPR_LETTER_HTML_TEMPLATE = Template("""
     </div>
 </body>
 </html>
-"""))
+""")
 
 
 # ---------------------------------------------------------------------------

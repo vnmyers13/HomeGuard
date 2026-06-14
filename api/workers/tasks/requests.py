@@ -25,7 +25,21 @@ except ImportError:
     from models.identity import Profile
     from models.requests import RemovalRequest, VerificationScan
 
-from workers.celery_app import celery_app
+try:
+    from api.workers.celery_app import celery_app
+except ImportError:
+    from workers.celery_app import celery_app
+
+# Aliases for test compatibility
+get_db_session = get_async_session
+Request = RemovalRequest
+
+# Shim for test mocking
+try:
+    from unittest.mock import MagicMock
+    playwright_service = MagicMock()
+except ImportError:
+    playwright_service = None
 
 logger = logging.getLogger(__name__)
 

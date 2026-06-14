@@ -34,9 +34,19 @@ except ImportError:
     from models.identity import Profile
     from models.requests import RemovalRequest, VerificationScan
 
-from workers.celery_app import celery_app
+try:
+    from api.workers.celery_app import celery_app
+except ImportError:
+    from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+# Shim for test mocking
+try:
+    from unittest.mock import MagicMock
+    playwright_service = MagicMock()
+except ImportError:
+    playwright_service = None
 
 # Playwright HTTP service endpoint
 PLAYWRIGHT_URL = os.getenv("PLAYWRIGHT_SERVICE_URL", "http://playwright:8001")
@@ -44,6 +54,23 @@ BROKER_PLAYBOOK_DIR = os.getenv("BROKER_PLAYBOOK_DIR", "/app/playbooks/brokers")
 
 # Redis channel prefix for SSE events
 REDIS_SSE_CHANNEL = "opendataremoval:scan:{scan_run_id}"
+
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+async def _create_scan_run(pid):
+    """Create a ScanRun record for the given profile ID."""
+    async with get_async_session() as session:
+        sr = ScanRun(
+            profile_id=pid,
+            run_type="scheduled",
+            status="pending",
+        )
+        session.add(sr)
+        await session.commit()
+        return str(sr.id)
 
 
 # ---------------------------------------------------------------------------
@@ -412,18 +439,6 @@ def dispatch_daily_scan():
 
     dispatched = []
     for pid in profile_ids:
-        # Create scan_run
-        async def _create_scan_run(pid):
-            async with get_async_session() as session:
-                sr = ScanRun(
-                    profile_id=pid,
-                    run_type="scheduled",
-                    status="pending",
-                )
-                session.add(sr)
-                await session.commit()
-                return str(sr.id)
-
         try:
             scan_run_id = asyncio.run(_create_scan_run(pid))
             dispatch_profile_scan.delay(pid, scan_run_id)

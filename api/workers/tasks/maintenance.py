@@ -1,10 +1,19 @@
 """Celery tasks for maintenance - cleanup, cron jobs, health checks."""
 
+import glob
 import logging
+import os
+import shutil
 from datetime import datetime, timedelta
 
-from workers.celery_app import celery_app
-from database import get_async_session
+try:
+    from api.workers.celery_app import celery_app
+except ImportError:
+    from workers.celery_app import celery_app
+try:
+    from api.database import get_async_session
+except ImportError:
+    from database import get_async_session
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +57,6 @@ def cleanup_old_scans(max_age_days: int = 90):
 @celery_app.task(name="maintenance.purge_expired_screenshots")
 def purge_expired_screenshots(max_age_days: int = 30):
     """Remove screenshot files that are older than max_age_days."""
-    import os
-    import glob
-
     logger.info("Purging screenshots older than %d days", max_age_days)
     screenshot_dir = os.environ.get("SCREENSHOT_DIR", "/tmp/screenshots")
     cutoff = datetime.utcnow() - timedelta(days=max_age_days)
@@ -72,9 +78,6 @@ def purge_expired_screenshots(max_age_days: int = 30):
 @celery_app.task(name="maintenance.compute_disk_usage")
 def compute_disk_usage():
     """Compute disk usage stats for screenshots and playbooks directories."""
-    import os
-    import shutil
-
     dirs = {
         "screenshots": os.environ.get("SCREENSHOT_DIR", "/tmp/screenshots"),
         "playbooks": os.environ.get("PLAYBOOK_DIR", "./playbooks"),
@@ -119,7 +122,6 @@ def health_check():
 
     # Check Redis connectivity
     try:
-        from workers.celery_app import celery_app
         # Redis connection check via Celery
         checks["redis"] = True
     except Exception as e:
