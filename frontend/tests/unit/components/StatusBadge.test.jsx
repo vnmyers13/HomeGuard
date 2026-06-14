@@ -1,6 +1,6 @@
+import React from 'react'
 import { render, screen } from '@testing-library/react'
-import '@testing-library/jest-dom'
-import StatusBadge from '../src/components/StatusBadge'
+import StatusBadge from '../../../src/components/StatusBadge'
 
 describe('StatusBadge', () => {
   it('renders with default styles for unknown status', () => {

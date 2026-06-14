@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Requests - Removal request tracking page
  * Sprint 5: Track and manage removal requests

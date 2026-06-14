@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * ScanProgress - Displays scan progress with steps and status.
  * Can be driven by WebSocket updates or polling.

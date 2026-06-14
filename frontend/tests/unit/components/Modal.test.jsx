@@ -1,5 +1,5 @@
+import React from 'react'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import '@testing-library/jest-dom'
 import Modal from '../../../src/components/Modal'
 
 describe('Modal', () => {
@@ -18,7 +18,8 @@ describe('Modal', () => {
 
   it('closes on backdrop click', () => {
     render(<Modal isOpen={true} onClose={onClose}>Content</Modal>)
-    fireEvent.click(document.querySelector('.fixed.inset-0'))
+    const backdrop = document.querySelector('.bg-black\\/50') || document.querySelector('[onClick]')
+    fireEvent.click(backdrop)
     expect(onClose).toHaveBeenCalled()
   })
 

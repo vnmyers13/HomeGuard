@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Dashboard layout - sidebar navigation + content area for authenticated views.
  */

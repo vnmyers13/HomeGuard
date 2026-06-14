@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Onboarding wizard - 5-step flow for new households.
  * Sprint 6: Guided setup for first-time users.

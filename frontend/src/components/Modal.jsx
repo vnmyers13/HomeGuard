@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Modal - Reusable modal dialog with backdrop, header, body, and footer.
  */

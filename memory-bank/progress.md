@@ -335,7 +335,7 @@ Version 1.04. Completed remaining Sprint 5 tasks: password reset endpoints, batc
 - [x] Pushed to GitHub and Gitea
 
 ## Sprint 6 (COMPLETED ✅) - Frontend Pages, E2E Tests & Complete Test Suite
-Version 1.05. All dashboard pages complete. Full test suite with 50+ unit tests and 7 E2E test suites.
+Version 1.06. All dashboard pages complete. Full test suite with 59 unit tests and 7 E2E test suites.
 
 ### S6-T1: Common Components (COMPLETE ✅)
 - [x] `frontend/src/components/StatusBadge.jsx` — colored status badge (18+ status types)

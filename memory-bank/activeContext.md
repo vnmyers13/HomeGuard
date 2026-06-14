@@ -12,9 +12,11 @@
 | S6-T1 | Common components (StatusBadge, ScoreGauge, DataTable, ScanProgress, EmptyState, Modal, Card) | COMPLETE ✅ | Extracted from inline page components |
 | S6-T2 | Reports, SystemHealth, Settings pages | COMPLETE ✅ | Recharts charts, service status, preferences |
 | S6-T3 | Onboarding wizard + routing updates | COMPLETE ✅ | 5-step wizard, onboarding store, new routes |
-| S6-T4 | Frontend vitest setup + component tests | COMPLETE ✅ | vitest config, 8 test files, 50+ tests |
+| S6-T4 | Frontend vitest setup + component tests | COMPLETE ✅ | vitest config, 8 test files, 59 tests |
 | S6-T5 | Playwright E2E infrastructure | COMPLETE ✅ | playwright.config.ts, auth/navigation fixtures |
 | S6-T6 | E2E tests (7 test suites) | COMPLETE ✅ | auth, onboarding, dashboard, profiles, requests, scans, settings |
+
+**Current Version: 1.06**
 
 ## Sprint 6 Status: COMPLETE ✅
 Sprint 6 delivered all dashboard pages (Reports, SystemHealth, Settings), the Onboarding wizard (5-step), 7 reusable components, full vitest test suite (50+ tests), and Playwright E2E tests (7 suites, 30+ tests). Version bumped to 1.05.

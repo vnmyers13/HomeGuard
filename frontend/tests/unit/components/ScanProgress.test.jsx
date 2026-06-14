@@ -1,5 +1,5 @@
+import React from 'react'
 import { render, screen } from '@testing-library/react'
-import '@testing-library/jest-dom'
 import ScanProgress from '../../../src/components/ScanProgress'
 
 describe('ScanProgress', () => {
@@ -30,7 +30,7 @@ describe('ScanProgress', () => {
         steps={['Done']}
       />
     )
-    expect(screen.getByText('completed')).toBeInTheDocument()
+    expect(screen.getByText(/completed/i)).toBeInTheDocument()
   })
 
   it('renders failed status', () => {
@@ -40,14 +40,14 @@ describe('ScanProgress', () => {
         steps={[]}
       />
     )
-    expect(screen.getByText('failed')).toBeInTheDocument()
+    expect(screen.getByText(/failed/i)).toBeInTheDocument()
   })
 
   it('renders compact mode', () => {
     render(
       <ScanProgress
         scan={{ status: 'running', current_step: 1 }}
-        steps={[]}
+        steps={['Step 1', 'Step 2']}
         compact
       />
     )

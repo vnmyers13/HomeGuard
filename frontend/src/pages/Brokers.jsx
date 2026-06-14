@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Brokers page - browse and manage data broker registry.
  */

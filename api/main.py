@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HomeGuard API",
     description="Privacy Protection Platform API",
-    version="1.05",
+    version="1.06",
     lifespan=lifespan,
 )
 
@@ -70,7 +70,7 @@ async def health_check():
                 "database": "up",
                 "redis": "up",
             },
-            "version": "1.01",
+            "version": "1.06",
         },
     }
 

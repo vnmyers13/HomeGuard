@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * StatusBadge - Displays a colored badge for status values.
  * Reusable across all pages.

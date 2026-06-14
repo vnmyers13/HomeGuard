@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * ScoreGauge - Circular score display for exposure/privacy scores.
  * 0-100 score with color-coded ring.

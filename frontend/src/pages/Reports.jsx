@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Reports - Exposure analytics and removal statistics.
  * Sprint 6: Reports page with charts and data exports.

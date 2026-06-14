@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Household page - manage household members associated with a profile.
  */

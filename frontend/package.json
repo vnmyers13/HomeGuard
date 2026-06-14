@@ -1,6 +1,6 @@
 {
   "name": "homeguard-frontend",
-  "version": "1.05",
+  "version": "1.06",
   "private": true,
   "type": "module",
   "scripts": {

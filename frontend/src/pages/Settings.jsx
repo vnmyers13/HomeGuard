@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Settings - User preferences and account settings.
  * Sprint 6: Account, notification, and data retention settings.

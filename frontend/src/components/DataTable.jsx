@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * DataTable - Generic sortable, paginated table component.
  */

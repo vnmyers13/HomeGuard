@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Overview page - main dashboard landing with stats and quick actions.
  */

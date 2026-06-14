@@ -1,5 +1,54 @@
 # HomeGuard Release Notes
 
+## Version 1.06 - Frontend Pages, E2E Tests & Complete Test Suite (2026-06-14)
+
+### Overview
+Sprint 6 delivers all remaining dashboard pages, the Onboarding wizard, reusable component library, full vitest test suite (59 tests), and Playwright E2E tests (7 suites, 30+ tests).
+
+### New Features
+
+#### Dashboard Pages
+- **Reports** - Exposure trends chart, broker summary table, removal statistics with Recharts visualizations
+- **System Health** - Service status grid, disk usage monitoring, alert display
+- **Settings** - Notification preferences, account settings, data retention controls (3 tabs)
+
+#### Onboarding Wizard
+- **5-step flow** - Welcome → Household → Profile → Email → First Scan
+- **Zustand store** - Persistent wizard state across steps
+- **Validation** - Required field validation with error messages
+- **Navigation** - Back/Continue buttons, skip option, completion tracking
+
+#### Component Library
+- **StatusBadge** - 18+ status types with color-coded badges
+- **ScoreGauge** - Circular score display (0-100) with color gradient
+- **Card** - Reusable card wrapper with dark mode support
+- **Modal** - Backdrop, Escape key, size variants (sm/xl/2xl)
+- **EmptyState** - Empty state with optional CTA button
+- **DataTable** - Sortable, paginated, searchable table
+- **ScanProgress** - Progress bar + step list with WebSocket support
+
+#### Test Suite
+- **Vitest config** - jsdom environment, 75% coverage threshold
+- **59 unit tests** - All components and stores tested
+- **7 E2E suites** - Auth, onboarding, dashboard, profiles, requests, scans, settings
+- **Playwright fixtures** - Auth and navigation helpers
+
+### API Endpoints Added
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | /api/reports/exposure-trends | Yes | Exposure trend data |
+| GET | /api/reports/broker-summary | Yes | Broker summary data |
+| GET | /api/reports/removal-stats | Yes | Removal statistics |
+| GET | /api/system/health | Yes | System health status |
+
+### Changes
+- **Version bump** - 1.05 → 1.06
+- **App routes** - Added Reports, SystemHealth, Settings, Onboarding routes
+- **DashboardLayout** - Added Reports, Notifications, System Health nav links
+- **Test fixes** - Fixed vitest config, React imports, test assertions
+
+---
+
 ## Version 1.04 - Password Reset, Batch Operations & Test Suite Fixes (2026-06-13)
 
 ### Overview

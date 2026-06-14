@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Notifications - Alert history and notification preferences
  * Sprint 4: Notification system UI

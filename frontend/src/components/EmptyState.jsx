@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * EmptyState - Empty state with illustration, title, description, and optional CTA.
  */

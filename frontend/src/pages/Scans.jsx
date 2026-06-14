@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Scans page - view scan history and trigger new deletion requests.
  */

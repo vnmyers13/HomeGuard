@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * Profile page - manage personal information for broker monitoring.
  */

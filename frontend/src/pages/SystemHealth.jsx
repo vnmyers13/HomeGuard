@@ -1,3 +1,4 @@
+import React from 'react'
 /**
  * SystemHealth - Service status dashboard.
  * Sprint 6: System health monitoring page.
