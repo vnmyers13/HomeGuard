@@ -300,6 +300,32 @@ Version 1.03. Fixed critical test suite issues, migration syntax errors, and add
 - [x] `api/main.py`: 1.02 → 1.03
 - [x] `frontend/package.json`: 1.02 → 1.03
 
+## Sprint 5.6 - Password Reset, Batch Operations, DockerHub Images (2026-06-13)
+Version 1.04. Completed remaining Sprint 5 tasks: password reset endpoints, batch profile creation, DockerHub images.
+
+### Password Reset Flow (Completed)
+- [x] Added `PasswordResetToken` model to `api/models/auth.py`
+- [x] Added `generate_code`, `create_magic_link`, `verify_magic_link`, `reset_password_with_code` methods to `AuthService`
+- [x] Added `POST /auth/forgot-password`, `/auth/verify-code`, `/auth/reset-password` endpoints
+- [x] Password reset tokens stored in DB with expiry and usage tracking
+- [x] Session revocation on password reset
+
+### Batch Profile Operations (Completed)
+- [x] Added `ProfileBatchCreate`, `BatchCreateResult`, `BatchCreateResponse` schemas
+- [x] Added `batch_create_profiles` method to `ProfileService` (max 100 profiles per request)
+- [x] Added `POST /profiles/batch` endpoint
+- [x] Per-profile success/failure tracking in batch responses
+
+### Docker Compose Update (Completed)
+- [x] Changed `api`, `worker`, `beat` to use `vnmyers13/homeguard-api:1.04`
+- [x] Changed `playwright` to use `vnmyers13/homeguard-playwright:1.04`
+- [x] Changed `mailwatcher` to use `vnmyers13/homeguard-mailwatcher:1.04`
+- [x] Changed `frontend` to use `vnmyers13/homeguard-frontend:1.04`
+
+### Version Bump
+- [x] `api/main.py`: 1.03 → 1.04
+- [x] `frontend/package.json`: 1.03 → 1.04
+
 ## Release 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
 First production-ready release. Fixes 8 critical bugs preventing reliable operation.
 
