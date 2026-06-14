@@ -1,6 +1,8 @@
-# OpenDataRemoval Privacy Platform
+# HomeGuard
 
-Automated personal data removal and monitoring platform. Discovers your personal data across data broker sites and submits removal requests automatically.
+Automated PII removal and monitoring platform. Discovers your personal data across data broker sites and submits removal requests automatically.
+
+**Current Version: 1.06**
 
 
 ---
