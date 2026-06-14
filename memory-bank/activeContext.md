@@ -16,6 +16,11 @@
 | S6-T5 | Playwright E2E infrastructure | COMPLETE ✅ | playwright.config.ts, auth/navigation fixtures |
 | S6-T6 | E2E tests (7 test suites) | COMPLETE ✅ | auth, onboarding, dashboard, profiles, requests, scans, settings |
 
+## Sprint 6 Status: COMPLETE ✅
+Sprint 6 delivered all dashboard pages (Reports, SystemHealth, Settings), the Onboarding wizard (5-step), 7 reusable components, full vitest test suite (50+ tests), and Playwright E2E tests (7 suites, 30+ tests). Version bumped to 1.05.
+
+**Sprint 6 Score**: 6/6 tasks completed (100%).
+
 ## Sprint 5 Status: COMPLETE ✅
 Sprint 5 delivered the removal request lifecycle tracking system, legal letter PDF generation (CCPA/GDPR), real-time scan progress via WebSockets, and a full frontend Requests page. Sprint 5.5 added test suite fixes, migration fixes, and password reset schemas. Sprint 5.6 completed password reset flow, batch profile operations, test import fixes, and DockerHub image publishing (v1.04).
 
