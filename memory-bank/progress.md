@@ -330,14 +330,17 @@ Version 1.04. Completed remaining Sprint 5 tasks: password reset endpoints, batc
 - [x] Fixed mailwatcher/playwright unit test imports with `pytest.importorskip`
 - [x] 81 tests pass, 162 skipped (mailwatcher/playwright tests in API container)
 - [x] Reverted docker-compose.yml to DockerHub images
+- [x] RELEASE_NOTES.md updated with v1.04 release notes
+- [x] Gitea release v1.04 created
+- [x] Pushed to GitHub and Gitea
 
-## Sprint 6 - Test Suite Completion & DockerHub Release (2026-06-13)
-Version 1.04. Fixed remaining test suite issues, completed DockerHub release.
+## Sprint 7 - Data Broker Discovery & n8n Integration (Upcoming)
+Version 1.05. Next sprint focuses on data broker discovery and n8n workflow integration.
 
-### Test Suite Fixes (Completed)
-- [x] Used `pytest.importorskip` for mailwatcher/playwright test files
-- [x] 81 tests pass, 162 skipped (mailwatcher/playwright tests unavailable in API container)
-- [x] All critical bugs fixed, DockerHub images built and pushed
+### Planned Features
+- [ ] Pull data broker list from https://databrokerswatch.org/
+- [ ] Build removal flow via n8n workflow integration
+- [ ] Complete mailwatcher/playwright test suite
 
 ## Release 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
 First production-ready release. Fixes 8 critical bugs preventing reliable operation.
