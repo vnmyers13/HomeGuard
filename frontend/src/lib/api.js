@@ -166,6 +166,31 @@ export const alertsApi = {
   acknowledge: (id) => api.post(`/alerts/${id}/acknowledge`),
 };
 
+// --- Request endpoints ---
+
+export const getRequests = (params) => api.get('/requests', { params });
+export const getRequest = (id) => api.get(`/requests/${id}`);
+export const createRequest = (data) => api.post('/requests', data);
+export const updateRequest = (id, data) => api.patch(`/requests/${id}`, data);
+export const deleteRequest = (id) => api.delete(`/requests/${id}`);
+export const getRequestLogs = (id) => api.get(`/requests/${id}/logs`);
+export const getFollowups = (id) => api.get(`/requests/${id}/followups`);
+export const createFollowup = (id, data) => api.post(`/requests/${id}/followups`, data);
+export const getVerificationScans = (id) => api.get(`/requests/${id}/verification-scans`);
+export const createVerificationScan = (id, data) => api.post(`/requests/${id}/verification-scans`, data);
+export const downloadLegalLetter = (id, letterType) =>
+  api.get(`/requests/${id}/pdf`, { params: { letter_type: letterType }, responseType: 'blob' });
+
+// --- Report endpoints ---
+
+export const getExposureTrends = (params) => api.get('/reports/exposure-trends', { params });
+export const getBrokerSummary = () => api.get('/reports/broker-summary');
+export const getRemovalStats = () => api.get('/reports/removal-stats');
+
+// --- System endpoints ---
+
+export const getDiskUsage = () => api.get('/system/disk-usage');
+
 // --- Notification preferences (client-side only, no backend endpoint yet) ---
 
 const PREFS_KEY = 'homeguard_prefs';

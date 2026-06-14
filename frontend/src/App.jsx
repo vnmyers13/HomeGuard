@@ -18,6 +18,10 @@ import Brokers from './pages/Brokers';
 import Scans from './pages/Scans';
 import Notifications from './pages/Notifications';
 import Requests from './pages/Requests';
+import Reports from './pages/Reports';
+import SystemHealth from './pages/SystemHealth';
+import Settings from './pages/Settings';
+import Onboarding from './pages/Onboarding';
 import { useAuthStore } from './stores/authStore';
 
 // ----------------------
@@ -41,6 +45,7 @@ export default function App() {
         {/* Public routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+        <Route path="/onboarding" element={<Onboarding />} />
 
         {/* Protected dashboard routes */}
         <Route
@@ -58,6 +63,9 @@ export default function App() {
           <Route path="scans" element={<Scans />} />
           <Route path="notifications" element={<Notifications />} />
           <Route path="requests" element={<Requests />} />
+          <Route path="reports" element={<Reports />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="health" element={<SystemHealth />} />
         </Route>
 
         {/* Fallback: redirect to dashboard */}

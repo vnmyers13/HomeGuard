@@ -1,19 +1,30 @@
 # Active Context
 
-**Last Updated**: 2026-05-14
+**Last Updated**: 2026-06-14
 
-## Current Sprint: Sprint 4 (COMPLETED ✅)
+## Current Sprint: Sprint 6 (COMPLETED ✅)
 
-**Sprint 4 Goal**: Full scan→exposure→removal→verification pipeline end-to-end. Mailwatcher classifying emails with two-stage classifier. All critical paths CP-02 through CP-05 and CP-09 passing.
+**Sprint 6 Goal**: All dashboard pages complete. Full test suite passing. All 13 critical paths green.
 
-### Sprint 4 Task Breakdown (5 tasks) - ALL COMPLETE
+### Sprint 6 Task Breakdown (6 tasks) - ALL COMPLETE
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| S4-T1 | Celery app config, Beat schedule, task infrastructure | COMPLETE ✅ | Worker config, 4 Beat entries, base task class |
-| S4-T2 | Scan tasks — dispatch chain, scan_broker, analytics chord | COMPLETE ✅ | Full scan pipeline with exposure detection |
-| S4-T3 | Removal request tasks — web form, email, legal letter | COMPLETE ✅ | 4 removal methods + follow-up escalation |
-| S4-T4 | Mailwatcher — two-stage classifier, patterns, link extractor | COMPLETE ✅ | Keyword prefilter + regex classification |
-| S4-T5 | Maintenance, registry, notification tasks | COMPLETE ✅ | Purge, disk usage, broker health, notifications |
+| S6-T1 | Common components (StatusBadge, ScoreGauge, DataTable, ScanProgress, EmptyState, Modal, Card) | COMPLETE ✅ | Extracted from inline page components |
+| S6-T2 | Reports, SystemHealth, Settings pages | COMPLETE ✅ | Recharts charts, service status, preferences |
+| S6-T3 | Onboarding wizard + routing updates | COMPLETE ✅ | 5-step wizard, onboarding store, new routes |
+| S6-T4 | Frontend vitest setup + component tests | COMPLETE ✅ | vitest config, 8 test files, 50+ tests |
+| S6-T5 | Playwright E2E infrastructure | COMPLETE ✅ | playwright.config.ts, auth/navigation fixtures |
+| S6-T6 | E2E tests (7 test suites) | COMPLETE ✅ | auth, onboarding, dashboard, profiles, requests, scans, settings |
+
+## Sprint 5 Status: COMPLETE ✅
+Sprint 5 delivered the removal request lifecycle tracking system, legal letter PDF generation (CCPA/GDPR), real-time scan progress via WebSockets, and a full frontend Requests page. Sprint 5.5 added test suite fixes, migration fixes, and password reset schemas. Sprint 5.6 completed password reset flow, batch profile operations, test import fixes, and DockerHub image publishing (v1.04).
+
+**Sprint 5 Score**: All deliverables complete (v1.04 released).
+
+## Sprint 4 Status: COMPLETE ✅
+Sprint 4 delivered the full scan→exposure→removal→verification pipeline end-to-end. Mailwatcher classifying emails with two-stage classifier. All critical paths CP-02 through CP-05 and CP-09 passing.
+
+**Sprint 4 Score**: 5/5 tasks completed (100%).
 
 ## Sprint 3 Status: COMPLETE ✅
 Sprint 3 delivered the complete Playwright Executor microservice with browser pool, 16 action handlers, playbook execution engine, async job API. Mailwatcher email pipeline with IMAP client, classifier, notifier. Celery integration wiring run_scan_task to Playwright. 192 total tests (151 Playwright + 41 E2E).
@@ -23,6 +34,13 @@ Sprint 3 delivered the complete Playwright Executor microservice with browser po
 ## Sprint 2 Status: COMPLETE
 Sprint 2 delivered authentication, core REST API (auth, profiles, brokers, webhooks, scans), and React dashboard with 6 pages. All code written, routers registered, frontend routing configured. 45+ unit tests passing with 80%+ coverage.
 
+**Sprint 2 Score: 6/6 tasks completed (100%)**
+
+## Sprint 1 Status: COMPLETE
+Sprint 1 delivered the project foundation: Docker Compose scaffold with 9 services, init.sh bootstrap script, database migration covering 20 tables across 7 schema domains, 8 API model files, FastAPI scaffold with middleware and health endpoints, 50+ broker playbook JSONs, Celery infrastructure, Playwright executor, and Mailwatcher.
+
+---
+
 ## Important Patterns & Preferences
 - **API responses**: Always wrapped in `{ success: bool, data?: ..., error_code?: string, message?: string }`
 - **Auth**: JWT access tokens (short-lived) + refresh tokens (stored in Redis for blacklisting)
@@ -30,15 +48,19 @@ Sprint 2 delivered authentication, core REST API (auth, profiles, brokers, webho
 - **Frontend**: React + Vite + Tailwind, Zustand for state, react-query for data fetching
 - **Task queue**: Celery with Redis broker
 - **Browser automation**: Playwright with JSON playbook-driven navigation
+- **Testing**: pytest for backend, vitest for frontend components, Playwright for E2E
 
 ## Key Learnings
 - npm not available on host machine - frontend builds inside Docker containers
 - Scan trigger API creates DB record but Celery task dispatch was deferred to Sprint 3
 - Logout requires Redis connectivity for token blacklisting
 - Playwright service runs on port 8001 within Docker network
+- Components should be extracted early for reusability
+- vitest config needs jsdom environment for React component testing
 
-## Next Immediate Steps - Sprint 5
-- **S5-T1**: Frontend removal request tracking page
-- **S5-T2**: Legal letter PDF generation and download
-- **S5-T3**: Real-time scan progress via WebSocket
-- **S5-T4**: Performance optimization for large households (100+ profiles)
+## Next Immediate Steps - Sprint 7
+- **S7-T1**: Apply host security hardening — UFW, fail2ban, GPG backup
+- **S7-T2**: Run all 12 security verification checks
+- **S7-T3**: Configure backup schedule and verify restore
+- **S7-T4**: Final test suite run — all 13 critical paths
+- **S7-T5**: Onboard first household member and complete sign-off

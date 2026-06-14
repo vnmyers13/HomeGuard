@@ -334,13 +334,113 @@ Version 1.04. Completed remaining Sprint 5 tasks: password reset endpoints, batc
 - [x] Gitea release v1.04 created
 - [x] Pushed to GitHub and Gitea
 
-## Sprint 7 - Data Broker Discovery & n8n Integration (Upcoming)
-Version 1.05. Next sprint focuses on data broker discovery and n8n workflow integration.
+## Sprint 6 (COMPLETED ✅) - Frontend Pages, E2E Tests & Complete Test Suite
+Version 1.05. All dashboard pages complete. Full test suite with 50+ unit tests and 7 E2E test suites.
+
+### S6-T1: Common Components (COMPLETE ✅)
+- [x] `frontend/src/components/StatusBadge.jsx` — colored status badge (18+ status types)
+- [x] `frontend/src/components/ScoreGauge.jsx` — circular score display (0-100, color-coded)
+- [x] `frontend/src/components/Card.jsx` — card wrapper with dark mode support
+- [x] `frontend/src/components/Modal.jsx` — reusable modal with backdrop, Escape key, size variants
+- [x] `frontend/src/components/EmptyState.jsx` — empty state with optional CTA
+- [x] `frontend/src/components/DataTable.jsx` — sortable, paginated, searchable table
+- [x] `frontend/src/components/ScanProgress.jsx` — progress bar + step list, compact mode
+
+### S6-T2: New Pages (COMPLETE ✅)
+- [x] `frontend/src/pages/Reports.jsx` — exposure trends, broker summary, removal stats with Recharts
+- [x] `frontend/src/pages/SystemHealth.jsx` — service status grid, disk usage, alerts
+- [x] `frontend/src/pages/Settings.jsx` — notifications, account, data retention tabs
+
+### S6-T3: Onboarding Wizard (COMPLETE ✅)
+- [x] `frontend/src/stores/onboardingStore.js` — Zustand store for wizard state
+- [x] `frontend/src/pages/Onboarding.jsx` — 5-step wizard (Welcome → Household → Profile → Email → First Scan)
+- [x] Updated `frontend/src/App.jsx` — added Routes for Reports, SystemHealth, Settings, Onboarding
+- [x] Updated `frontend/src/components/DashboardLayout.jsx` — added nav items for Reports, Notifications, System Health
+
+### S6-T4: Vitest Setup + Component Tests (COMPLETE ✅)
+- [x] `frontend/vitest.config.js` — vitest config with jsdom, coverage thresholds (75%)
+- [x] `frontend/src/test-utils.jsx` — test setup with jest-dom matchers, mock IntersectionObserver/ResizeObserver
+- [x] 8 test files created with 50+ tests:
+  - `frontend/tests/unit/components/StatusBadge.test.jsx` (7 tests)
+  - `frontend/tests/unit/components/ScoreGauge.test.jsx` (10 tests)
+  - `frontend/tests/unit/components/Card.test.jsx` (5 tests)
+  - `frontend/tests/unit/components/Modal.test.jsx` (9 tests)
+  - `frontend/tests/unit/components/EmptyState.test.jsx` (5 tests)
+  - `frontend/tests/unit/components/ScanProgress.test.jsx` (7 tests)
+  - `frontend/tests/unit/components/DataTable.test.jsx` (8 tests)
+  - `frontend/tests/unit/stores/onboardingStore.test.js` (6 tests)
+
+### S6-T5: Playwright E2E Infrastructure (COMPLETE ✅)
+- [x] `e2e/playwright.config.ts` — Playwright config with auth fixtures
+- [x] `e2e/fixtures/auth.ts` — Auth fixture for login flows
+- [x] `e2e/fixtures/navigation.ts` — Navigation helpers for common page routes
+
+### S6-T6: E2E Tests (COMPLETE ✅)
+- [x] `e2e/tests/auth.spec.ts` — Authentication tests (3 tests)
+- [x] `e2e/tests/onboarding.spec.ts` — Onboarding wizard tests (5 tests)
+- [x] `e2e/tests/dashboard.spec.ts` — Dashboard navigation tests (7 tests)
+- [x] `e2e/tests/profiles.spec.ts` — Profile page tests (3 tests)
+- [x] `e2e/tests/requests.spec.ts` — Requests page tests (3 tests)
+- [x] `e2e/tests/scans.spec.ts` — Scans page tests (3 tests)
+- [x] `e2e/tests/settings.spec.ts` — Settings page tests (6 tests)
+
+### Sprint 6 Files Created (20 files)
+**Components (7):**
+- `frontend/src/components/StatusBadge.jsx`
+- `frontend/src/components/ScoreGauge.jsx`
+- `frontend/src/components/Card.jsx`
+- `frontend/src/components/Modal.jsx`
+- `frontend/src/components/EmptyState.jsx`
+- `frontend/src/components/DataTable.jsx`
+- `frontend/src/components/ScanProgress.jsx`
+
+**Pages (4):**
+- `frontend/src/pages/Reports.jsx`
+- `frontend/src/pages/SystemHealth.jsx`
+- `frontend/src/pages/Settings.jsx`
+- `frontend/src/pages/Onboarding.jsx`
+
+**Stores & Utilities:**
+- `frontend/src/stores/onboardingStore.js`
+- `frontend/src/test-utils.jsx`
+- `frontend/vitest.config.js`
+
+**E2E Tests (11):**
+- `e2e/playwright.config.ts`
+- `e2e/fixtures/auth.ts`
+- `e2e/fixtures/navigation.ts`
+- `e2e/tests/auth.spec.ts`
+- `e2e/tests/onboarding.spec.ts`
+- `e2e/tests/dashboard.spec.ts`
+- `e2e/tests/profiles.spec.ts`
+- `e2e/tests/requests.spec.ts`
+- `e2e/tests/scans.spec.ts`
+- `e2e/tests/settings.spec.ts`
+
+**Component Tests (8):**
+- `frontend/tests/unit/components/StatusBadge.test.jsx`
+- `frontend/tests/unit/components/ScoreGauge.test.jsx`
+- `frontend/tests/unit/components/Card.test.jsx`
+- `frontend/tests/unit/components/Modal.test.jsx`
+- `frontend/tests/unit/components/EmptyState.test.jsx`
+- `frontend/tests/unit/components/ScanProgress.test.jsx`
+- `frontend/tests/unit/components/DataTable.test.jsx`
+- `frontend/tests/unit/stores/onboardingStore.test.js`
+
+### Sprint 6 Files Modified (3 files)
+- `frontend/src/App.jsx` — Added routes for Reports, SystemHealth, Settings, Onboarding
+- `frontend/src/components/DashboardLayout.jsx` — Added Reports, Notifications, System Health nav links
+- `frontend/src/lib/api.js` — Added request, report, system API endpoints
+
+## Sprint 7 - Security Hardening & Final Sign-off (Upcoming)
+Version 1.05. Final sprint focuses on host security hardening, security verification, backup configuration, and final sign-off.
 
 ### Planned Features
-- [ ] Pull data broker list from https://databrokerswatch.org/
-- [ ] Build removal flow via n8n workflow integration
-- [ ] Complete mailwatcher/playwright test suite
+- [ ] Host security: UFW, fail2ban, GPG backup
+- [ ] 12 security verification checks
+- [ ] Backup schedule and restore verification
+- [ ] Final test suite run — all 13 critical paths
+- [ ] First household member onboarding
 
 ## Release 1.01 - Critical Bug Fixes & Release Readiness (2026-06-13)
 First production-ready release. Fixes 8 critical bugs preventing reliable operation.
