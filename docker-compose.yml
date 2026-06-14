@@ -66,9 +66,7 @@ services:
         max-file: "5"
 
   api:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: vnmyers13/homeguard-api:1.04
     restart: unless-stopped
     ports:
       - "${HOST_BIND_ADDRESS}:8000:8000"
@@ -131,9 +129,7 @@ services:
         max-file: "5"
 
   worker:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: vnmyers13/homeguard-api:1.04
     restart: unless-stopped
     command: celery -A workers.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY}
     environment:
@@ -184,9 +180,7 @@ services:
         max-file: "5"
 
   beat:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
+    image: vnmyers13/homeguard-api:1.04
     restart: unless-stopped
     command: celery -A workers.celery_app beat --loglevel=info
     environment:
@@ -227,9 +221,7 @@ services:
         max-file: "5"
 
   playwright:
-    build:
-      context: ./playwright
-      dockerfile: Dockerfile
+    image: vnmyers13/homeguard-playwright:1.04
     restart: unless-stopped
     environment:
       - PLAYWRIGHT_PROXY_URL=${PLAYWRIGHT_PROXY_URL}
@@ -261,9 +253,7 @@ services:
         max-file: "5"
 
   mailwatcher:
-    build:
-      context: ./mailwatcher
-      dockerfile: Dockerfile
+    image: vnmyers13/homeguard-mailwatcher:1.04
     restart: unless-stopped
     environment:
       - DATABASE_URL=${DATABASE_URL}
@@ -293,9 +283,7 @@ services:
         max-file: "5"
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: vnmyers13/homeguard-frontend:1.04
     restart: unless-stopped
     ports:
       - "${HOST_BIND_ADDRESS}:3000:80"
