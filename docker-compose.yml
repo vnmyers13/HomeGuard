@@ -66,7 +66,7 @@ services:
         max-file: "5"
 
   api:
-    image: vnmyers13/homeguard-api:1.04
+    build: ./api
     restart: unless-stopped
     ports:
       - "${HOST_BIND_ADDRESS}:8000:8000"
@@ -129,7 +129,7 @@ services:
         max-file: "5"
 
   worker:
-    image: vnmyers13/homeguard-api:1.04
+    build: ./api
     restart: unless-stopped
     command: celery -A workers.celery_app worker --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY}
     environment:
@@ -180,7 +180,7 @@ services:
         max-file: "5"
 
   beat:
-    image: vnmyers13/homeguard-api:1.04
+    build: ./api
     restart: unless-stopped
     command: celery -A workers.celery_app beat --loglevel=info
     environment:
@@ -221,7 +221,7 @@ services:
         max-file: "5"
 
   playwright:
-    image: vnmyers13/homeguard-playwright:1.04
+    build: ./gw_playwright
     restart: unless-stopped
     environment:
       - PLAYWRIGHT_PROXY_URL=${PLAYWRIGHT_PROXY_URL}
@@ -253,7 +253,7 @@ services:
         max-file: "5"
 
   mailwatcher:
-    image: vnmyers13/homeguard-mailwatcher:1.04
+    build: ./mailwatcher
     restart: unless-stopped
     environment:
       - DATABASE_URL=${DATABASE_URL}
@@ -283,7 +283,7 @@ services:
         max-file: "5"
 
   frontend:
-    image: vnmyers13/homeguard-frontend:1.04
+    build: ./frontend
     restart: unless-stopped
     ports:
       - "${HOST_BIND_ADDRESS}:81:80"
