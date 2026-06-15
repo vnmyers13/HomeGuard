@@ -286,7 +286,7 @@ services:
     image: vnmyers13/homeguard-frontend:1.04
     restart: unless-stopped
     ports:
-      - "${HOST_BIND_ADDRESS}:3000:80"
+      - "${HOST_BIND_ADDRESS}:81:80"
     networks:
       - opendataremoval_net
     depends_on:

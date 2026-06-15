@@ -127,7 +127,7 @@ start_all_services() {
     log_info "OpenDataRemoval is running:"
     echo "  API:       http://localhost:8000"
     echo "  Docs:      http://localhost:8000/docs"
-    echo "  Frontend:  http://localhost:3000"
+    echo "  Frontend:  http://localhost:81"
     echo "  n8n:       http://localhost:5678"
     echo ""
     log_info "Useful commands:"
