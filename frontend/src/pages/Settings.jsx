@@ -7,7 +7,7 @@ import React from 'react'
 import { useState } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import Card from '../components/Card';
-import { getPreferences, savePreferences } from '../lib/api';
+import { getPreferences, updatePreferences } from '../lib/api';
 
 export default function Settings() {
   const { user, logout } = useAuthStore();
@@ -33,7 +33,7 @@ export default function Settings() {
     setSaving(true);
     setSaved(false);
     try {
-      savePreferences(prefs);
+      updatePreferences(prefs);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
