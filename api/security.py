@@ -169,3 +169,7 @@ async def get_optional_user(
         return payload.get("sub")
     except HTTPException:
         return None
+
+
+# Alias for backward compatibility with router imports
+require_auth = get_current_user
