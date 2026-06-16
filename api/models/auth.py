@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 try:
-    from api.database import Base
+    from database import Base
 except ImportError:
     from database import Base
 

@@ -1,9 +1,9 @@
 """Email templates for notification delivery."""
 
-from api.templates.removal_confirmed import REMOVAL_CONFIRMED_TEMPLATE
-from api.templates.scan_complete import SCAN_COMPLETE_TEMPLATE
-from api.templates.removal_pending import REMOVAL_PENDING_TEMPLATE
-from api.templates.error_alert import ERROR_ALERT_TEMPLATE
+from templates.removal_confirmed import REMOVAL_CONFIRMED_TEMPLATE
+from templates.scan_complete import SCAN_COMPLETE_TEMPLATE
+from templates.removal_pending import REMOVAL_PENDING_TEMPLATE
+from templates.error_alert import ERROR_ALERT_TEMPLATE
 
 TEMPLATES = {
     "removal_confirmed": REMOVAL_CONFIRMED_TEMPLATE,

@@ -46,8 +46,8 @@ def _write_audit_event(event_type: str, data: dict):
     """Write an event to audit.system_events via async DB session."""
     import asyncio
     try:
-        from api.database import get_async_session
-        from api.models.audit import SystemEvent
+        from database import get_async_session
+        from models.audit import SystemEvent
     except ImportError:
         from database import get_async_session
         from models.audit import SystemEvent

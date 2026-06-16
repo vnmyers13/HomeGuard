@@ -13,11 +13,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from api.database import get_async_session
-    from api.models.scanning import ScanRun
-    from api.models.registry import Broker
-    from api.models.identity import Profile
-    from api.models.requests import RemovalRequest, VerificationScan
+    from database import get_async_session
+    from models.scanning import ScanRun
+    from models.registry import Broker
+    from models.identity import Profile
+    from models.requests import RemovalRequest, VerificationScan
 except ImportError:
     from database import get_async_session
     from models.scanning import ScanRun
@@ -26,7 +26,7 @@ except ImportError:
     from models.requests import RemovalRequest, VerificationScan
 
 try:
-    from api.workers.celery_app import celery_app
+    from workers.celery_app import celery_app
 except ImportError:
     from workers.celery_app import celery_app
 
@@ -472,7 +472,7 @@ def process_email_classification(classification_id: str):
     logger.info("process_email_classification: classification_id=%s", classification_id)
 
     async def _run():
-        from api.models.mail import EmailClassification
+        from models.mail import EmailClassification
         async with get_async_session() as session:
             classification = await session.get(EmailClassification, classification_id)
             if not classification:

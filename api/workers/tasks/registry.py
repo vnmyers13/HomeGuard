@@ -16,12 +16,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from api.workers.celery_app import celery_app
+    from workers.celery_app import celery_app
 except ImportError:
     from workers.celery_app import celery_app
 try:
-    from api.database import get_async_session
-    from api.models.registry import Broker
+    from database import get_async_session
+    from models.registry import Broker
 except ImportError:
     from database import get_async_session
     from models.registry import Broker

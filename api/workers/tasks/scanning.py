@@ -20,12 +20,12 @@ from sqlalchemy import select, func as sql_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from api.database import get_async_session
-    from api.models.scanning import ScanRun, ScanResult, Exposure, Screenshot
-    from api.models.reporting import ExposureScore, DailyBrokerSnapshot, RelistingEvent
-    from api.models.registry import Broker
-    from api.models.identity import Profile
-    from api.models.requests import RemovalRequest, VerificationScan
+    from database import get_async_session
+    from models.scanning import ScanRun, ScanResult, Exposure, Screenshot
+    from models.reporting import ExposureScore, DailyBrokerSnapshot, RelistingEvent
+    from models.registry import Broker
+    from models.identity import Profile
+    from models.requests import RemovalRequest, VerificationScan
 except ImportError:
     from database import get_async_session
     from models.scanning import ScanRun, ScanResult, Exposure, Screenshot
@@ -35,7 +35,7 @@ except ImportError:
     from models.requests import RemovalRequest, VerificationScan
 
 try:
-    from api.workers.celery_app import celery_app
+    from workers.celery_app import celery_app
 except ImportError:
     from workers.celery_app import celery_app
 

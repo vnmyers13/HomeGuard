@@ -7,7 +7,7 @@ from sqlalchemy import Column, Text, Boolean, DateTime, Integer, Date
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 try:
-    from api.database import Base
+    from database import Base
 except ImportError:
     from database import Base
 

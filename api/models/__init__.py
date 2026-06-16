@@ -7,7 +7,7 @@ from sqlalchemy import TypeDecorator, text, LargeBinary
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET, DATE as PGDate
 from sqlalchemy.sql import func
 try:
-    from api.database import Base
+    from database import Base
 except ImportError:
     from database import Base
 
@@ -37,15 +37,15 @@ class EncryptedText(TypeDecorator):
 
 # Import all model modules to register with Base.metadata
 try:
-    from api.models.identity import Profile, ProfileField, Alias, IdentityDocument
-    from api.models.registry import Broker, BrokerFieldRequirement, BrokerPlaybook, EmailTemplate
-    from api.models.scanning import ScanRun, ScanResult, Exposure, Screenshot
-    from api.models.requests import RemovalRequest, RequestStatusLog, Followup, VerificationScan
-    from api.models.mail import InboundMessage, MessageClassification
-    from api.models.audit import AuditLog, SystemEvent
-    from api.models.reporting import ExposureScore, DailyBrokerSnapshot, RelistingEvent, FieldExposureSummary
-    from api.models.auth import Household, User, Session, Notification
-    from api.models.archive import (
+    from models.identity import Profile, ProfileField, Alias, IdentityDocument
+    from models.registry import Broker, BrokerFieldRequirement, BrokerPlaybook, EmailTemplate
+    from models.scanning import ScanRun, ScanResult, Exposure, Screenshot
+    from models.requests import RemovalRequest, RequestStatusLog, Followup, VerificationScan
+    from models.mail import InboundMessage, MessageClassification
+    from models.audit import AuditLog, SystemEvent
+    from models.reporting import ExposureScore, DailyBrokerSnapshot, RelistingEvent, FieldExposureSummary
+    from models.auth import Household, User, Session, Notification
+    from models.archive import (
         ArchiveProfile, ArchiveProfileField, ArchiveAlias,
         ArchiveIdentityDocument, ArchiveExposure, ArchiveScanResult,
         ArchiveRemovalRequest, ArchiveRequestStatusLog, ArchiveFollowup,

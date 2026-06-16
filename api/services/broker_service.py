@@ -335,7 +335,7 @@ class BrokerService:
         for row in brokers:
             bid = str(row[0])
             try:
-                from api.workers.tasks.scanning import scan_broker
+                from workers.tasks.scanning import scan_broker
                 scan_broker.delay(profile_id, bid, run_id)
             except ImportError:
                 logger.warning("celery tasks not available, skipping dispatch", broker_id=bid)

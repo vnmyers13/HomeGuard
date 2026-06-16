@@ -17,10 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 try:
-    from api.database import get_async_session
-    from api.models.auth import User
-    from api.models.scanning import ScanRun
-    from api.models.requests import RemovalRequest
+    from database import get_async_session
+    from models.auth import User
+    from models.scanning import ScanRun
+    from models.requests import RemovalRequest
 except ImportError:
     from database import get_async_session
     from models.auth import User

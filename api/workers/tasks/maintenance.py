@@ -7,11 +7,11 @@ import shutil
 from datetime import datetime, timedelta
 
 try:
-    from api.workers.celery_app import celery_app
+    from workers.celery_app import celery_app
 except ImportError:
     from workers.celery_app import celery_app
 try:
-    from api.database import get_async_session
+    from database import get_async_session
 except ImportError:
     from database import get_async_session
 
