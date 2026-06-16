@@ -94,7 +94,7 @@ celery_app.conf.update(
 
 # Auto-discover task modules
 celery_app.conf.update(
-    include=["api.workers.tasks"],
+    include=["workers.tasks"],
 )
 
 if __name__ == "__main__":

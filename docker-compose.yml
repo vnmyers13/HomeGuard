@@ -266,6 +266,8 @@ services:
       - IMAP_POLL_INTERVAL_SECONDS=${IMAP_POLL_INTERVAL_SECONDS}
       - REMOVAL_EMAIL=${REMOVAL_EMAIL}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+    volumes:
+      - ./api/models:/app/api/models:ro
     networks:
       - opendataremoval_net
       - opendataremoval_egress
