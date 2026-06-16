@@ -8,8 +8,8 @@ from typing import Any, Optional
 
 from playwright.async_api import Page
 
-from gw_playwright.screenshot import capture_screenshot
-from gw_playwright.token_resolver import resolve_tokens
+from screenshot import capture_screenshot
+from token_resolver import resolve_tokens
 
 logger = logging.getLogger(__name__)
 

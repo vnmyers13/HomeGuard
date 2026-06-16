@@ -1,3 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "homeguard-api"
+version = "1.07"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["api*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = [

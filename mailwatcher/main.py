@@ -14,10 +14,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # Mailwatcher modules
-from mailwatcher.imap_client import IMAPClient
-from mailwatcher.classifier import EmailClassifier, Classification
-from mailwatcher.repository import MailRepository
-from mailwatcher.notifier import WebhookDispatcher
+from imap_client import IMAPClient
+from classifier import EmailClassifier, Classification
+from repository import MailRepository
+from notifier import WebhookDispatcher
 
 
 class MailPoller:

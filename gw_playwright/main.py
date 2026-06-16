@@ -8,8 +8,8 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
-from gw_playwright.executor import PlaybookExecutor
-from gw_playwright.models import (
+from executor import PlaybookExecutor
+from models import (
     HealthResponse,
     JobListResponse,
     JobResult,
@@ -21,7 +21,7 @@ from gw_playwright.models import (
     RetryResponse,
     ScanJobRequest,
 )
-from gw_playwright.pool import get_pool, shutdown_pool
+from pool import get_pool, shutdown_pool
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def _run_job(job_state: JobState):
         result.started_at = asyncio.get_event_loop().time()
 
         # Flatten playbook phases into steps for executor
-        from gw_playwright.executor import PlaybookStep
+        from executor import PlaybookStep
 
         steps = []
         for phase in result.playbook.phases:
@@ -94,7 +94,7 @@ async def _run_job(job_state: JobState):
         )
 
         # Build step results
-        from gw_playwright.models import ActionType, StepResult
+        from models import ActionType, StepResult
 
         for r in exec_state.results:
             step_result = StepResult(

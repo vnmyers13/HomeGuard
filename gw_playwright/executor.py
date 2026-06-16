@@ -10,10 +10,10 @@ from typing import Any, Callable, Optional
 
 from playwright.async_api import BrowserContext, Page
 
-from gw_playwright.actions import ActionResult, execute_actions
-from gw_playwright.models import PlaybookStep
-from gw_playwright.screenshot import capture_screenshot
-from gw_playwright.token_resolver import resolve_tokens
+from actions import ActionResult, execute_actions
+from models import PlaybookStep
+from screenshot import capture_screenshot
+from token_resolver import resolve_tokens
 
 logger = logging.getLogger(__name__)
 
